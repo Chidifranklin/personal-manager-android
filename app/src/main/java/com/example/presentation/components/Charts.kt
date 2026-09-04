@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
+import com.example.util.CurrencyFormatter
 
 data class DonutSlice(
     val label: String,
@@ -41,7 +42,7 @@ fun ExpenseDonutChart(
     slices: List<DonutSlice>,
     modifier: Modifier = Modifier,
     totalLabel: String = "Total Spent",
-    centerCurrency: String = "$"
+    currencyCode: String = "USD"
 ) {
     val total = remember(slices) { slices.sumOf { it.value } }
     var selectedSlice by remember { mutableStateOf<DonutSlice?>(null) }
@@ -105,7 +106,7 @@ fun ExpenseDonutChart(
                 )
                 val displayedAmount = selectedSlice?.value ?: total
                 Text(
-                    text = "$centerCurrency${String.format("%.2f", displayedAmount)}",
+                    text = CurrencyFormatter.format(displayedAmount, currencyCode),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -260,7 +261,8 @@ fun TrendLineChart(
 fun LentVsBorrowedRatioBar(
     totalLent: Double,
     totalBorrowed: Double,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currencyCode: String = "USD"
 ) {
     val total = (totalLent + totalBorrowed).coerceAtLeast(0.01)
     val lentRatio = (totalLent / total).toFloat()
@@ -275,7 +277,7 @@ fun LentVsBorrowedRatioBar(
                 Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(VioletReceivable))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Lent (Receivables): $${String.format("%.2f", totalLent)}",
+                    text = "Lent (Receivables): ${CurrencyFormatter.format(totalLent, currencyCode)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -284,7 +286,7 @@ fun LentVsBorrowedRatioBar(
                 Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(AmberPayable))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Borrowed: $${String.format("%.2f", totalBorrowed)}",
+                    text = "Borrowed: ${CurrencyFormatter.format(totalBorrowed, currencyCode)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )

@@ -9,6 +9,7 @@ import com.example.data.local.entity.TransactionEntity
 import com.example.data.model.CategoryBudgetProgress
 import com.example.data.model.DebtWithDetails
 import com.example.data.model.FinancialSummary
+import com.example.data.preferences.PreferenceManager
 import com.example.data.repository.PersonalManagerRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,14 @@ data class DashboardUiState(
     val pendingTasks: List<TaskEntity> = emptyList(),
     val upcomingReminders: List<EventReminderEntity> = emptyList(),
     val debtsWithDetails: List<DebtWithDetails> = emptyList(),
-    val budgetProgress: List<CategoryBudgetProgress> = emptyList()
+    val budgetProgress: List<CategoryBudgetProgress> = emptyList(),
+    val currencyCode: String = PreferenceManager.getDefaultCurrencyCode()
 )
 
-class DashboardViewModel(private val repository: PersonalManagerRepository) : ViewModel() {
+class DashboardViewModel(
+    private val repository: PersonalManagerRepository,
+    private val preferenceManager: PreferenceManager
+) : ViewModel() {
 
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.financialSummaryFlow,
@@ -37,7 +42,8 @@ class DashboardViewModel(private val repository: PersonalManagerRepository) : Vi
         repository.tasksFlow,
         repository.remindersFlow,
         repository.debtsWithDetailsFlow,
-        repository.budgetProgressFlow
+        repository.budgetProgressFlow,
+        preferenceManager.currencyCodeFlow
     ) { args: Array<Any?> ->
         val summary = args[0] as FinancialSummary
         val accounts = args[1] as List<AccountEntity>
@@ -47,6 +53,7 @@ class DashboardViewModel(private val repository: PersonalManagerRepository) : Vi
         val reminders = args[5] as List<EventReminderEntity>
         val debts = args[6] as List<DebtWithDetails>
         val budgets = args[7] as List<CategoryBudgetProgress>
+        val currencyCode = args[8] as String
 
         DashboardUiState(
             financialSummary = summary,
@@ -56,13 +63,20 @@ class DashboardViewModel(private val repository: PersonalManagerRepository) : Vi
             pendingTasks = tasks.filter { !it.isCompleted }.take(5),
             upcomingReminders = reminders.filter { !it.isDismissed && it.triggerTime > System.currentTimeMillis() }.take(5),
             debtsWithDetails = debts,
-            budgetProgress = budgets
+            budgetProgress = budgets,
+            currencyCode = currencyCode
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = DashboardUiState()
     )
+
+    fun setCurrencyCode(currencyCode: String) {
+        viewModelScope.launch {
+            preferenceManager.setCurrencyCode(currencyCode)
+        }
+    }
 
     fun toggleTaskCompletion(taskId: String, completed: Boolean) {
         viewModelScope.launch {

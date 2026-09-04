@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.local.entity.Priority
 import com.example.data.local.entity.TransactionType
+import com.example.presentation.components.CurrencySelectionBottomSheet
 import com.example.presentation.components.DonutSlice
 import com.example.presentation.components.ExpenseDonutChart
 import com.example.presentation.components.LentVsBorrowedRatioBar
@@ -27,6 +28,7 @@ import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
+import com.example.util.CurrencyFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,6 +45,7 @@ fun DashboardScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var selectedTrendPeriod by remember { mutableStateOf("Weekly") }
+    var showCurrencySheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -63,8 +66,29 @@ fun DashboardScreen(
                 },
                 actions = {
                     AssistChip(
+                        onClick = { showCurrencySheet = true },
+                        label = {
+                            Text(
+                                text = "${state.currencyCode} (${CurrencyFormatter.getCurrencySymbol(state.currencyCode)})",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.CurrencyExchange,
+                                contentDescription = "Select Currency",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .testTag("dashboard_currency_selector_chip")
+                    )
+                    AssistChip(
                         onClick = {},
-                        label = { Text("Local DB Synced", style = MaterialTheme.typography.labelSmall) },
+                        label = { Text("DB Synced", style = MaterialTheme.typography.labelSmall) },
                         leadingIcon = {
                             Box(
                                 modifier = Modifier
@@ -134,7 +158,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "$${String.format(Locale.US, "%,.2f", state.financialSummary.netWorth)}",
+                            text = CurrencyFormatter.format(state.financialSummary.netWorth, state.currencyCode),
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -154,7 +178,7 @@ fun DashboardScreen(
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                                 )
                                 Text(
-                                    text = "$${String.format(Locale.US, "%,.2f", state.financialSummary.liquidCash)}",
+                                    text = CurrencyFormatter.format(state.financialSummary.liquidCash, state.currencyCode),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -168,7 +192,7 @@ fun DashboardScreen(
                                     color = VioletReceivable
                                 )
                                 Text(
-                                    text = "$${String.format(Locale.US, "%,.2f", state.financialSummary.totalReceivables)}",
+                                    text = CurrencyFormatter.format(state.financialSummary.totalReceivables, state.currencyCode),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = VioletReceivable
@@ -182,7 +206,7 @@ fun DashboardScreen(
                                     color = AmberPayable
                                 )
                                 Text(
-                                    text = "$${String.format(Locale.US, "%,.2f", state.financialSummary.totalPayables)}",
+                                    text = CurrencyFormatter.format(state.financialSummary.totalPayables, state.currencyCode),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AmberPayable
@@ -203,7 +227,7 @@ fun DashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Default Spending: ${state.defaultAccount!!.name} ($${String.format(Locale.US, "%,.2f", state.defaultAccount!!.balance)})",
+                                    text = "Default Spending: ${state.defaultAccount!!.name} (${CurrencyFormatter.format(state.defaultAccount!!.balance, state.currencyCode)})",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
                                 )
@@ -262,7 +286,8 @@ fun DashboardScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             LentVsBorrowedRatioBar(
                                 totalLent = state.financialSummary.totalReceivables,
-                                totalBorrowed = state.financialSummary.totalPayables
+                                totalBorrowed = state.financialSummary.totalPayables,
+                                currencyCode = state.currencyCode
                             )
                         }
                     }
@@ -366,7 +391,7 @@ fun DashboardScreen(
                             )
                         }
 
-                        ExpenseDonutChart(slices = slices)
+                        ExpenseDonutChart(slices = slices, currencyCode = state.currencyCode)
                     }
                 }
             }
@@ -517,6 +542,16 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(48.dp))
             }
         }
+    }
+
+    if (showCurrencySheet) {
+        CurrencySelectionBottomSheet(
+            currentCurrencyCode = state.currencyCode,
+            onSelectCurrency = { newCode ->
+                viewModel.setCurrencyCode(newCode)
+            },
+            onDismiss = { showCurrencySheet = false }
+        )
     }
 }
 

@@ -24,13 +24,15 @@ import com.example.data.local.entity.AccountType
 import com.example.data.local.entity.DebtDirection
 import com.example.data.local.entity.TransactionType
 import com.example.data.model.DebtWithDetails
-import com.example.presentation.components.ExpenseDonutChart
+import com.example.presentation.components.CurrencySelectionBottomSheet
 import com.example.presentation.components.DonutSlice
+import com.example.presentation.components.ExpenseDonutChart
 import com.example.presentation.components.LentVsBorrowedRatioBar
 import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
+import com.example.util.CurrencyFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,6 +52,7 @@ fun FinanceScreen(
     var showCreateDebtDialog by remember { mutableStateOf(false) }
     var showRepaymentDialogForDebt by remember { mutableStateOf<DebtWithDetails?>(null) }
     var showSetBudgetDialog by remember { mutableStateOf(false) }
+    var showCurrencySheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -63,6 +66,27 @@ fun FinanceScreen(
                         )
                     },
                     actions = {
+                        AssistChip(
+                            onClick = { showCurrencySheet = true },
+                            label = {
+                                Text(
+                                    text = "${state.currencyCode} (${CurrencyFormatter.getCurrencySymbol(state.currencyCode)})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.CurrencyExchange,
+                                    contentDescription = "Select Currency",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .testTag("finance_currency_selector_chip")
+                        )
                         IconButton(onClick = {
                             when (selectedTab) {
                                 0 -> showAddAccountDialog = true
@@ -136,6 +160,7 @@ fun FinanceScreen(
     // --- Dialogs ---
     if (showAddAccountDialog) {
         AddAccountDialog(
+            currencyCode = state.currencyCode,
             onDismiss = { showAddAccountDialog = false },
             onConfirm = { name, type, balance, isDefault ->
                 viewModel.createAccount(name, type, balance, isDefault)
@@ -147,6 +172,7 @@ fun FinanceScreen(
     if (showLogTransactionDialog) {
         LogTransactionDialog(
             accounts = state.accounts,
+            currencyCode = state.currencyCode,
             onDismiss = { showLogTransactionDialog = false },
             onConfirm = { accountId, type, amount, category, note ->
                 viewModel.logTransaction(accountId, type, amount, category, note)
@@ -158,6 +184,7 @@ fun FinanceScreen(
     if (showCreateDebtDialog) {
         CreateDebtDialog(
             accounts = state.accounts,
+            currencyCode = state.currencyCode,
             onDismiss = { showCreateDebtDialog = false },
             onConfirm = { counterparty, direction, amount, accountId, dueDate, note ->
                 viewModel.createDebt(counterparty, direction, amount, accountId, dueDate, note)
@@ -170,6 +197,7 @@ fun FinanceScreen(
         RecordRepaymentDialog(
             debtWithDetails = debtWithDetails,
             accounts = state.accounts,
+            currencyCode = state.currencyCode,
             onDismiss = { showRepaymentDialogForDebt = null },
             onConfirm = { targetAccountId, amountPaid, note ->
                 viewModel.recordRepayment(debtWithDetails.debt.debtId, targetAccountId, amountPaid, note)
@@ -180,11 +208,22 @@ fun FinanceScreen(
 
     if (showSetBudgetDialog) {
         SetBudgetDialog(
+            currencyCode = state.currencyCode,
             onDismiss = { showSetBudgetDialog = false },
             onConfirm = { category, limit, allowRollover, rolloverFloor ->
                 viewModel.setBudget(category, limit, allowRollover, rolloverFloor)
                 showSetBudgetDialog = false
             }
+        )
+    }
+
+    if (showCurrencySheet) {
+        CurrencySelectionBottomSheet(
+            currentCurrencyCode = state.currencyCode,
+            onSelectCurrency = { newCode ->
+                viewModel.setCurrencyCode(newCode)
+            },
+            onDismiss = { showCurrencySheet = false }
         )
     }
 }
@@ -214,7 +253,7 @@ fun AccountsTab(
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = "$${String.format(Locale.US, "%,.2f", state.financialSummary.liquidCash)}",
+                        text = CurrencyFormatter.format(state.financialSummary.liquidCash, state.currencyCode),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -309,7 +348,7 @@ fun AccountsTab(
 
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "$${String.format(Locale.US, "%,.2f", account.balance)}",
+                            text = CurrencyFormatter.format(account.balance, state.currencyCode),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -450,7 +489,7 @@ fun TransactionsTab(
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
                                 text = (if (tx.type == TransactionType.INCOME) "+" else "-") +
-                                        "$${String.format(Locale.US, "%,.2f", tx.amount)}",
+                                        CurrencyFormatter.format(tx.amount, state.currencyCode),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = if (tx.type == TransactionType.INCOME) EmeraldIncome else CrimsonExpense
@@ -518,6 +557,7 @@ fun DebtLedgerTab(
             items(lentDebts) { item ->
                 DebtLedgerItemCard(
                     item = item,
+                    currencyCode = state.currencyCode,
                     onRecordRepayment = { onRecordRepayment(item) }
                 )
             }
@@ -549,6 +589,7 @@ fun DebtLedgerTab(
             items(borrowedDebts) { item ->
                 DebtLedgerItemCard(
                     item = item,
+                    currencyCode = state.currencyCode,
                     onRecordRepayment = { onRecordRepayment(item) }
                 )
             }
@@ -563,6 +604,7 @@ fun DebtLedgerTab(
 @Composable
 fun DebtLedgerItemCard(
     item: DebtWithDetails,
+    currencyCode: String = "USD",
     onRecordRepayment: () -> Unit
 ) {
     Card(
@@ -591,13 +633,13 @@ fun DebtLedgerItemCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "Remaining: $${String.format(Locale.US, "%,.2f", item.remainingAmount)}",
+                        text = "Remaining: ${CurrencyFormatter.format(item.remainingAmount, currencyCode)}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (item.isFullySettled) EmeraldIncome else MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Principal: $${String.format(Locale.US, "%,.2f", item.debt.principalAmount)}",
+                        text = "Principal: ${CurrencyFormatter.format(item.debt.principalAmount, currencyCode)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -623,7 +665,7 @@ fun DebtLedgerItemCard(
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
-                            text = "+$${String.format(Locale.US, "%,.2f", rep.amountPaid)}",
+                            text = "+${CurrencyFormatter.format(rep.amountPaid, currencyCode)}",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = EmeraldIncome
@@ -691,7 +733,7 @@ fun BudgetsTab(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Unused surpluses carry forward if rollover is enabled. Overspending deficits are bounded by a minimum floor (default \$0.00) to prevent negative compounding spirals.",
+                        text = "Unused surpluses carry forward if rollover is enabled. Overspending deficits are bounded by a minimum floor (default ${CurrencyFormatter.format(0.0, state.currencyCode)}) to prevent negative compounding spirals.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -731,7 +773,7 @@ fun BudgetsTab(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "$${String.format(Locale.US, "%,.2f", bp.spentThisMonth)} / $${String.format(Locale.US, "%,.2f", bp.effectiveLimit)}",
+                                text = "${CurrencyFormatter.format(bp.spentThisMonth, state.currencyCode)} / ${CurrencyFormatter.format(bp.effectiveLimit, state.currencyCode)}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -753,7 +795,7 @@ fun BudgetsTab(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = if (bp.remaining >= 0) "$${String.format(Locale.US, "%,.2f", bp.remaining)} left" else "$${String.format(Locale.US, "%,.2f", -bp.remaining)} over budget",
+                                text = if (bp.remaining >= 0) "${CurrencyFormatter.format(bp.remaining, state.currencyCode)} left" else "${CurrencyFormatter.format(-bp.remaining, state.currencyCode)} over budget",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (bp.remaining >= 0) EmeraldIncome else CrimsonExpense,
                                 fontWeight = FontWeight.Bold
@@ -764,7 +806,7 @@ fun BudgetsTab(
                                     color = MaterialTheme.colorScheme.primaryContainer
                                 ) {
                                     Text(
-                                        text = "Rollover Active (Floor: $${bp.budget.rolloverFloor})",
+                                        text = "Rollover Active (Floor: ${CurrencyFormatter.format(bp.budget.rolloverFloor, state.currencyCode)})",
                                         style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
@@ -786,6 +828,7 @@ fun BudgetsTab(
 
 @Composable
 fun AddAccountDialog(
+    currencyCode: String = "USD",
     onDismiss: () -> Unit,
     onConfirm: (name: String, type: AccountType, balance: Double, isDefault: Boolean) -> Unit
 ) {
@@ -793,6 +836,7 @@ fun AddAccountDialog(
     var type by remember { mutableStateOf(AccountType.BANK) }
     var balanceText by remember { mutableStateOf("") }
     var isDefault by remember { mutableStateOf(false) }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -809,7 +853,7 @@ fun AddAccountDialog(
                 OutlinedTextField(
                     value = balanceText,
                     onValueChange = { balanceText = it },
-                    label = { Text("Starting Balance ($)") },
+                    label = { Text("Starting Balance ($symbol)") },
                     placeholder = { Text("0.00") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -853,6 +897,7 @@ fun AddAccountDialog(
 @Composable
 fun LogTransactionDialog(
     accounts: List<AccountEntity>,
+    currencyCode: String = "USD",
     onDismiss: () -> Unit,
     onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?) -> Unit
 ) {
@@ -863,6 +908,7 @@ fun LogTransactionDialog(
     var selectedAccountId by remember {
         mutableStateOf(accounts.firstOrNull { it.isDefault }?.accountId ?: accounts.firstOrNull()?.accountId ?: "")
     }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
     val standardCategories = listOf("Groceries", "Food & Dining", "Utilities", "Salary", "Transport", "Entertainment", "Health", "Shopping")
 
@@ -890,7 +936,7 @@ fun LogTransactionDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = { Text("Amount ($)") },
+                    label = { Text("Amount ($symbol)") },
                     placeholder = { Text("0.00") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -918,7 +964,7 @@ fun LogTransactionDialog(
                         FilterChip(
                             selected = selectedAccountId == acc.accountId,
                             onClick = { selectedAccountId = acc.accountId },
-                            label = { Text("${acc.name} ($${String.format(Locale.US, "%.0f", acc.balance)})") }
+                            label = { Text("${acc.name} (${CurrencyFormatter.format(acc.balance, currencyCode)})") }
                         )
                     }
                 }
@@ -952,6 +998,7 @@ fun LogTransactionDialog(
 @Composable
 fun CreateDebtDialog(
     accounts: List<AccountEntity>,
+    currencyCode: String = "USD",
     onDismiss: () -> Unit,
     onConfirm: (counterparty: String, direction: DebtDirection, amount: Double, accountId: String, dueDate: Long?, note: String?) -> Unit
 ) {
@@ -962,6 +1009,7 @@ fun CreateDebtDialog(
     var selectedAccountId by remember {
         mutableStateOf(accounts.firstOrNull { it.isDefault }?.accountId ?: accounts.firstOrNull()?.accountId ?: "")
     }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -995,7 +1043,7 @@ fun CreateDebtDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = { Text("Principal Amount ($)") },
+                    label = { Text("Principal Amount ($symbol)") },
                     placeholder = { Text("0.00") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1044,6 +1092,7 @@ fun CreateDebtDialog(
 fun RecordRepaymentDialog(
     debtWithDetails: DebtWithDetails,
     accounts: List<AccountEntity>,
+    currencyCode: String = "USD",
     onDismiss: () -> Unit,
     onConfirm: (targetAccountId: String, amountPaid: Double, note: String?) -> Unit
 ) {
@@ -1052,6 +1101,7 @@ fun RecordRepaymentDialog(
         mutableStateOf(accounts.firstOrNull { it.isDefault }?.accountId ?: accounts.firstOrNull()?.accountId ?: "")
     }
     var note by remember { mutableStateOf("") }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1066,7 +1116,7 @@ fun RecordRepaymentDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Remaining Outstanding: $${String.format(Locale.US, "%,.2f", debtWithDetails.remainingAmount)}",
+                    text = "Remaining Outstanding: ${CurrencyFormatter.format(debtWithDetails.remainingAmount, currencyCode)}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -1074,7 +1124,7 @@ fun RecordRepaymentDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = { Text("Repayment Amount ($)") },
+                    label = { Text("Repayment Amount ($symbol)") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1120,12 +1170,14 @@ fun RecordRepaymentDialog(
 
 @Composable
 fun SetBudgetDialog(
+    currencyCode: String = "USD",
     onDismiss: () -> Unit,
     onConfirm: (category: String, limit: Double, allowRollover: Boolean, rolloverFloor: Double) -> Unit
 ) {
     var category by remember { mutableStateOf("") }
     var limitText by remember { mutableStateOf("") }
     var allowRollover by remember { mutableStateOf(false) }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1142,7 +1194,7 @@ fun SetBudgetDialog(
                 OutlinedTextField(
                     value = limitText,
                     onValueChange = { limitText = it },
-                    label = { Text("Monthly Limit ($)") },
+                    label = { Text("Monthly Limit ($symbol)") },
                     placeholder = { Text("400.00") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1152,7 +1204,7 @@ fun SetBudgetDialog(
                     Column {
                         Text("Enable Surplus Rollover", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Unspent funds carry over; deficits capped at \$0.00 floor",
+                            "Unspent funds carry over; deficits capped at $symbol" + "0.00 floor",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

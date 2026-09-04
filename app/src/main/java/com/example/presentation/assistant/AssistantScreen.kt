@@ -1,5 +1,11 @@
 package com.example.presentation.assistant
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,9 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.data.ai.AiDraftAction
 import com.example.data.local.entity.DebtDirection
 import com.example.data.local.entity.Priority
@@ -27,6 +35,9 @@ import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
+import com.example.util.CurrencyFormatter
+import com.example.util.VoiceInputManager
+import com.example.util.VoiceRecognitionState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -37,9 +48,50 @@ fun AssistantScreen(
     viewModel: AssistantViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Native Voice Input Manager
+    val voiceInputManager = remember { VoiceInputManager(context) }
+    val voiceState by voiceInputManager.recognitionState.collectAsState()
+    val isListening = voiceState is VoiceRecognitionState.Listening
+
+    // Handle voice transcription results
+    LaunchedEffect(voiceState) {
+        when (val vState = voiceState) {
+            is VoiceRecognitionState.PartialResult -> {
+                inputText = vState.text
+            }
+            is VoiceRecognitionState.FinalResult -> {
+                inputText = vState.text
+                voiceInputManager.resetState()
+            }
+            is VoiceRecognitionState.Error -> {
+                Toast.makeText(context, vState.message, Toast.LENGTH_SHORT).show()
+                voiceInputManager.resetState()
+            }
+            else -> {}
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceInputManager.stopListening()
+        }
+    }
+
+    // Permission launcher for RECORD_AUDIO
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceInputManager.startListening()
+        } else {
+            Toast.makeText(context, "Microphone permission is required for voice commands", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(state.messages.size) {
         if (state.messages.isNotEmpty()) {
@@ -108,6 +160,29 @@ fun AssistantScreen(
                     }
                 }
 
+                // Listening state banner
+                AnimatedVisibility(visible = isListening) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Listening... Speak your command or query",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -115,7 +190,7 @@ fun AssistantScreen(
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
-                        placeholder = { Text("Ask or issue a compound command...") },
+                        placeholder = { Text(if (isListening) "Listening to voice..." else "Ask or issue a compound command...") },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("assistant_input_field"),
@@ -124,13 +199,53 @@ fun AssistantScreen(
                         enabled = !state.isLoading
                     )
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Voice Input Microphone Toggle Button
+                    IconButton(
+                        onClick = {
+                            if (isListening) {
+                                voiceInputManager.stopListening()
+                            } else {
+                                val hasPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                                if (hasPermission) {
+                                    voiceInputManager.startListening()
+                                } else {
+                                    recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+                        },
+                        enabled = !state.isLoading,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isListening) MaterialTheme.colorScheme.errorContainer
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .testTag("assistant_voice_button")
+                    ) {
+                        Icon(
+                            if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = if (isListening) "Stop Listening" else "Voice Input",
+                            tint = if (isListening) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     IconButton(
                         onClick = {
                             if (inputText.isNotBlank()) {
                                 val text = inputText
                                 inputText = ""
+                                if (isListening) {
+                                    voiceInputManager.stopListening()
+                                }
                                 viewModel.sendMessage(text)
                             }
                         },
@@ -171,6 +286,7 @@ fun AssistantScreen(
             items(state.messages) { message ->
                 ChatMessageItem(
                     message = message,
+                    currencyCode = state.currencyCode,
                     onRemoveDraftAction = { actionId ->
                         viewModel.removeDraftAction(message.id, actionId)
                     },
@@ -203,6 +319,7 @@ fun AssistantScreen(
 @Composable
 fun ChatMessageItem(
     message: ChatMessage,
+    currencyCode: String = "USD",
     onRemoveDraftAction: (String) -> Unit,
     onConfirmAllDrafts: (List<AiDraftAction>) -> Unit
 ) {
@@ -289,6 +406,7 @@ fun ChatMessageItem(
                     message.draftActions.forEach { draft ->
                         DraftActionItemRow(
                             draft = draft,
+                            currencyCode = currencyCode,
                             isCommitted = message.isCommitted,
                             onRemove = { onRemoveDraftAction(draft.id) }
                         )
@@ -316,6 +434,7 @@ fun ChatMessageItem(
 @Composable
 fun DraftActionItemRow(
     draft: AiDraftAction,
+    currencyCode: String = "USD",
     isCommitted: Boolean,
     onRemove: () -> Unit
 ) {
@@ -375,7 +494,7 @@ fun DraftActionItemRow(
                 when (draft) {
                     is AiDraftAction.DebtDraft -> {
                         Text(
-                            text = "${if (draft.direction == DebtDirection.LENT) "Lend to" else "Borrow from"} ${draft.counterparty}: $${String.format(Locale.US, "%.2f", draft.amount)}",
+                            text = "${if (draft.direction == DebtDirection.LENT) "Lend to" else "Borrow from"} ${draft.counterparty}: ${CurrencyFormatter.format(draft.amount, currencyCode)}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -399,7 +518,7 @@ fun DraftActionItemRow(
                     }
                     is AiDraftAction.TransactionDraft -> {
                         Text(
-                            text = "${draft.category}: $${String.format(Locale.US, "%.2f", draft.amount)}",
+                            text = "${draft.category}: ${CurrencyFormatter.format(draft.amount, currencyCode)}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -423,12 +542,12 @@ fun DraftActionItemRow(
                     }
                     is AiDraftAction.BudgetDraft -> {
                         Text(
-                            text = "${draft.category}: $${String.format(Locale.US, "%.2f", draft.monthlyLimit)}/mo",
+                            text = "${draft.category}: ${CurrencyFormatter.format(draft.monthlyLimit, currencyCode)}/mo",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Rollover: ${if (draft.allowRollover) "Enabled (floor \$0)" else "Disabled"}",
+                            text = "Rollover: ${if (draft.allowRollover) "Enabled (floor ${CurrencyFormatter.format(0.0, currencyCode)})" else "Disabled"}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

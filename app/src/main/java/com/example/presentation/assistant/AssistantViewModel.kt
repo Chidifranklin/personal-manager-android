@@ -26,13 +26,15 @@ data class ChatMessage(
 data class AssistantUiState(
     val messages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
-    val pendingActionDrafts: List<AiDraftAction> = emptyList()
+    val pendingActionDrafts: List<AiDraftAction> = emptyList(),
+    val currencyCode: String = "USD"
 )
 
 class AssistantViewModel(
     private val assistantService: GeminiAssistantService,
     private val repository: PersonalManagerRepository,
-    private val alarmScheduler: AlarmScheduler
+    private val alarmScheduler: AlarmScheduler,
+    private val preferenceManager: com.example.data.preferences.PreferenceManager? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -40,12 +42,22 @@ class AssistantViewModel(
             messages = listOf(
                 ChatMessage(
                     isUser = false,
-                    text = "Hello! I am your Personal Manager Executive AI Assistant. You can ask me to log expenses, track loans, schedule agenda alarms, or answer questions about your financial health.\n\nTry compound commands like:\n• \"Lent Sarah \$50 for lunch from my Bank account, remind me Friday at 5 PM to collect\"\n• \"Spent \$25 on Groceries from Bank\"\n• \"How much did I spend this month?\""
+                    text = "Hello! I am your Personal Manager Executive AI Assistant. You can ask me to log expenses, track loans, schedule agenda alarms, or answer questions about your financial health.\n\nTry compound commands like:\n• \"Lent Sarah 50 for lunch from my Bank account, remind me Friday at 5 PM to collect\"\n• \"Spent 25 on Groceries from Bank\"\n• \"How much did I spend this month?\""
                 )
             )
         )
     )
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
+
+    init {
+        preferenceManager?.let { pm ->
+            viewModelScope.launch {
+                pm.currencyCodeFlow.collect { code ->
+                    _uiState.value = _uiState.value.copy(currencyCode = code)
+                }
+            }
+        }
+    }
 
     fun sendMessage(userText: String) {
         if (userText.isBlank() || _uiState.value.isLoading) return
@@ -91,7 +103,7 @@ class AssistantViewModel(
     }
 
     fun confirmAndExecuteDrafts(messageId: String, drafts: List<AiDraftAction>) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val accounts = repository.accountsFlow.firstOrNull() ?: emptyList()
             val defaultAccount = repository.defaultAccountFlow.firstOrNull() ?: accounts.firstOrNull()
             val defaultAccountId = defaultAccount?.accountId ?: ""

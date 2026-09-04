@@ -11,6 +11,7 @@ import com.example.data.local.entity.TransactionType
 import com.example.data.model.CategoryBudgetProgress
 import com.example.data.model.DebtWithDetails
 import com.example.data.model.FinancialSummary
+import com.example.data.preferences.PreferenceManager
 import com.example.data.repository.PersonalManagerRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,14 @@ data class FinanceUiState(
     val defaultAccount: AccountEntity? = null,
     val transactions: List<TransactionEntity> = emptyList(),
     val debtsWithDetails: List<DebtWithDetails> = emptyList(),
-    val budgetProgress: List<CategoryBudgetProgress> = emptyList()
+    val budgetProgress: List<CategoryBudgetProgress> = emptyList(),
+    val currencyCode: String = PreferenceManager.getDefaultCurrencyCode()
 )
 
-class FinanceViewModel(private val repository: PersonalManagerRepository) : ViewModel() {
+class FinanceViewModel(
+    private val repository: PersonalManagerRepository,
+    private val preferenceManager: PreferenceManager
+) : ViewModel() {
 
     val uiState: StateFlow<FinanceUiState> = combine(
         repository.financialSummaryFlow,
@@ -35,7 +40,8 @@ class FinanceViewModel(private val repository: PersonalManagerRepository) : View
         repository.defaultAccountFlow,
         repository.transactionsFlow,
         repository.debtsWithDetailsFlow,
-        repository.budgetProgressFlow
+        repository.budgetProgressFlow,
+        preferenceManager.currencyCodeFlow
     ) { args: Array<Any?> ->
         FinanceUiState(
             financialSummary = args[0] as FinancialSummary,
@@ -43,13 +49,20 @@ class FinanceViewModel(private val repository: PersonalManagerRepository) : View
             defaultAccount = args[2] as? AccountEntity,
             transactions = args[3] as List<TransactionEntity>,
             debtsWithDetails = args[4] as List<DebtWithDetails>,
-            budgetProgress = args[5] as List<CategoryBudgetProgress>
+            budgetProgress = args[5] as List<CategoryBudgetProgress>,
+            currencyCode = args[6] as String
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = FinanceUiState()
     )
+
+    fun setCurrencyCode(currencyCode: String) {
+        viewModelScope.launch {
+            preferenceManager.setCurrencyCode(currencyCode)
+        }
+    }
 
     fun createAccount(name: String, type: AccountType, balance: Double, isDefault: Boolean) {
         viewModelScope.launch {

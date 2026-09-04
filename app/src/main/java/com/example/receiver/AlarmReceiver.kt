@@ -93,13 +93,20 @@ class AlarmReceiver : BroadcastReceiver() {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                .build()
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Reminders & Alerts",
-                if (isCritical) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Offline alarms and agenda alerts for Personal Manager"
                 enableVibration(true)
+                setSound(soundUri, audioAttributes)
             }
             notificationManager.createNotificationChannel(channel)
         }

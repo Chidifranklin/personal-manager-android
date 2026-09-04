@@ -60,6 +60,7 @@ class MainActivity : FragmentActivity() {
         val repository = app.repository
         val alarmScheduler = app.alarmScheduler
         val aiService = app.aiService
+        val preferenceManager = app.preferenceManager
 
         setContent {
             MyApplicationTheme {
@@ -67,7 +68,7 @@ class MainActivity : FragmentActivity() {
                     factory = object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            DashboardViewModel(repository) as T
+                            DashboardViewModel(repository, preferenceManager) as T
                     }
                 )
 
@@ -75,7 +76,7 @@ class MainActivity : FragmentActivity() {
                     factory = object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            FinanceViewModel(repository) as T
+                            FinanceViewModel(repository, preferenceManager) as T
                     }
                 )
 
@@ -99,7 +100,7 @@ class MainActivity : FragmentActivity() {
                     factory = object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
                         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            AssistantViewModel(aiService, repository, alarmScheduler) as T
+                            AssistantViewModel(aiService, repository, alarmScheduler, preferenceManager) as T
                     }
                 )
 

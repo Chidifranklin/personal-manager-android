@@ -4,8 +4,11 @@ import com.example.BuildConfig
 import com.example.data.local.entity.DebtDirection
 import com.example.data.local.entity.Priority
 import com.example.data.local.entity.TransactionType
+import com.example.data.preferences.PreferenceManager
 import com.example.data.repository.PersonalManagerRepository
+import com.example.util.CurrencyFormatter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -17,7 +20,8 @@ import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 class GeminiAssistantService(
-    private val repository: PersonalManagerRepository
+    private val repository: PersonalManagerRepository,
+    private val preferenceManager: PreferenceManager
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -29,31 +33,38 @@ class GeminiAssistantService(
         val apiKey = BuildConfig.GEMINI_API_KEY.trim()
         val hasValidKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
 
+        val currencyCode = try {
+            preferenceManager.currencyCodeFlow.first()
+        } catch (e: Exception) {
+            "USD"
+        }
+
         // 1. Gather strictly privacy-filtered local aggregation context
         val unlockedNotes = repository.getUnlockedNotesForAiContext()
         val expenseAggregations = repository.getMonthlyExpenseBreakdownForAi()
         val accountBalances = repository.getAccountBalancesSummaryForAi()
 
         val contextBuilder = StringBuilder()
+        contextBuilder.append("Active User Currency: $currencyCode (${CurrencyFormatter.getCurrencySymbol(currencyCode)})\n")
         contextBuilder.append("Current System Context:\n")
-        contextBuilder.append("Accounts: ${accountBalances.joinToString { "${it.first}: $${String.format("%.2f", it.second)}" }}\n")
-        contextBuilder.append("Monthly Expenses by Category: ${expenseAggregations.entries.joinToString { "${it.key}: $${String.format("%.2f", it.value)}" }}\n")
+        contextBuilder.append("Accounts: ${accountBalances.joinToString { "${it.first}: ${CurrencyFormatter.format(it.second, currencyCode)}" }}\n")
+        contextBuilder.append("Monthly Expenses by Category: ${expenseAggregations.entries.joinToString { "${it.key}: ${CurrencyFormatter.format(it.value, currencyCode)}" }}\n")
         contextBuilder.append("User Notes (Unlocked only): ${unlockedNotes.joinToString { "${it.title}: ${it.content.take(60)}" }}\n")
 
         if (hasValidKey) {
             try {
-                return@withContext callGeminiApi(apiKey, userPrompt, contextBuilder.toString())
+                return@withContext callGeminiApi(apiKey, userPrompt, contextBuilder.toString(), currencyCode)
             } catch (e: Exception) {
                 // Fallback to local intelligent parser
-                return@withContext parseWithLocalEngine(userPrompt, expenseAggregations, accountBalances, fallbackNotice = " (Processed locally: ${e.localizedMessage})")
+                return@withContext parseWithLocalEngine(userPrompt, expenseAggregations, accountBalances, currencyCode, fallbackNotice = " (Processed locally: ${e.localizedMessage})")
             }
         } else {
-            return@withContext parseWithLocalEngine(userPrompt, expenseAggregations, accountBalances)
+            return@withContext parseWithLocalEngine(userPrompt, expenseAggregations, accountBalances, currencyCode)
         }
     }
 
-    private fun callGeminiApi(apiKey: String, prompt: String, contextInfo: String): AssistantTurnResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+    private fun callGeminiApi(apiKey: String, prompt: String, contextInfo: String, currencyCode: String): AssistantTurnResult {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
 
         val requestJson = JSONObject().apply {
             val contentsArray = JSONArray()
@@ -61,14 +72,16 @@ class GeminiAssistantService(
             val partsArray = JSONArray()
 
             val systemInstruction = """
-                You are the Personal Manager AI Assistant.
+                You are the Personal Manager Executive AI Assistant.
                 You help users organize finances, debts, tasks, reminders, and notes.
                 $contextInfo
                 
-                CRITICAL RULES:
-                1. DO NOT directly commit changes. Instead, return tool calls for proposed actions.
-                2. Compound commands MUST return composite/parallel tool calls (e.g. creating a debt AND creating a reminder).
-                3. For questions about expenses, accounts, or activities, answer conversationally using the provided numeric facts.
+                CRITICAL DIRECTIVES:
+                1. Whenever the user's input asks to create, log, add, spend, lend, borrow, schedule, or remind, you MUST call the corresponding tool/function declarations (create_task, log_transaction, create_debt, create_reminder, set_budget).
+                2. DO NOT reply with plain text instructions or pretend you performed actions in text. Execute the tool call so the user can preview and confirm the action draft.
+                3. Compound or multi-action requests (e.g. "Lent Sarah $50 for lunch from Bank account, remind me Friday at 5 PM to collect") MUST execute composite parallel function calls (both create_debt AND create_reminder).
+                4. For informational queries about expenses, balances, or notes, answer conversationally using the provided numerical context facts in the active user currency ($currencyCode).
+                5. Use $currencyCode as the default currency context for financial transactions and amounts.
             """.trimIndent()
 
             partsArray.put(JSONObject().put("text", "$systemInstruction\n\nUser request: $prompt"))
@@ -288,6 +301,7 @@ class GeminiAssistantService(
         prompt: String,
         expenseAggregations: Map<String, Double>,
         accountBalances: List<Pair<String, Double>>,
+        currencyCode: String,
         fallbackNotice: String = ""
     ): AssistantTurnResult {
         val lower = prompt.lowercase()
@@ -298,13 +312,13 @@ class GeminiAssistantService(
             for ((cat, total) in expenseAggregations) {
                 if (lower.contains(cat.lowercase())) {
                     return AssistantTurnResult(
-                        "According to your financial records this month, you have spent $${String.format("%.2f", total)} on $cat.$fallbackNotice"
+                        "According to your financial records this month, you have spent ${CurrencyFormatter.format(total, currencyCode)} on $cat.$fallbackNotice"
                     )
                 }
             }
             val totalAll = expenseAggregations.values.sum()
             return AssistantTurnResult(
-                "You have spent a total of $${String.format("%.2f", totalAll)} across all categories this month.$fallbackNotice"
+                "You have spent a total of ${CurrencyFormatter.format(totalAll, currencyCode)} across all categories this month.$fallbackNotice"
             )
         }
 
@@ -313,13 +327,13 @@ class GeminiAssistantService(
             for ((accName, bal) in accountBalances) {
                 if (lower.contains(accName.lowercase())) {
                     return AssistantTurnResult(
-                        "Your $accName currently has a liquid balance of $${String.format("%.2f", bal)}.$fallbackNotice"
+                        "Your $accName currently has a liquid balance of ${CurrencyFormatter.format(bal, currencyCode)}.$fallbackNotice"
                     )
                 }
             }
             val totalCash = accountBalances.sumOf { it.second }
             return AssistantTurnResult(
-                "Your total liquid cash across all accounts is $${String.format("%.2f", totalCash)}.$fallbackNotice"
+                "Your total liquid cash across all accounts is ${CurrencyFormatter.format(totalCash, currencyCode)}.$fallbackNotice"
             )
         }
 

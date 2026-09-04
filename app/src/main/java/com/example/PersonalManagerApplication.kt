@@ -3,6 +3,7 @@ package com.example
 import android.app.Application
 import com.example.data.ai.GeminiAssistantService
 import com.example.data.local.AppDatabase
+import com.example.data.preferences.PreferenceManager
 import com.example.data.repository.PersonalManagerRepository
 import com.example.util.AlarmScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -17,6 +18,9 @@ class PersonalManagerApplication : Application() {
     lateinit var repository: PersonalManagerRepository
         private set
 
+    lateinit var preferenceManager: PreferenceManager
+        private set
+
     lateinit var alarmScheduler: AlarmScheduler
         private set
 
@@ -27,8 +31,9 @@ class PersonalManagerApplication : Application() {
         super.onCreate()
         database = AppDatabase.getInstance(this)
         repository = PersonalManagerRepository(database)
+        preferenceManager = PreferenceManager(this)
         alarmScheduler = AlarmScheduler(this)
-        aiService = GeminiAssistantService(repository)
+        aiService = GeminiAssistantService(repository, preferenceManager)
 
         // Seed default initial state if brand new DB
         CoroutineScope(Dispatchers.IO).launch {
