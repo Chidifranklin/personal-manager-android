@@ -2,6 +2,11 @@ package com.example.presentation.finance
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Context
+import com.example.data.export.FinancialReportData
+import com.example.data.export.FinancialReportExportService
+import com.example.data.export.ReportFormat
+import com.example.data.export.ReportPeriodType
 import com.example.data.local.entity.AccountEntity
 import com.example.data.local.entity.AccountType
 import com.example.data.local.entity.DebtDirection
@@ -13,8 +18,10 @@ import com.example.data.model.DebtWithDetails
 import com.example.data.model.FinancialSummary
 import com.example.data.preferences.PreferenceManager
 import com.example.data.repository.PersonalManagerRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,8 +38,12 @@ data class FinanceUiState(
 
 class FinanceViewModel(
     private val repository: PersonalManagerRepository,
-    private val preferenceManager: PreferenceManager
+    private val preferenceManager: PreferenceManager,
+    private val exportService: FinancialReportExportService = FinancialReportExportService(repository)
 ) : ViewModel() {
+
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
 
     val uiState: StateFlow<FinanceUiState> = combine(
         repository.financialSummaryFlow,
@@ -117,5 +128,73 @@ class FinanceViewModel(
         viewModelScope.launch {
             repository.deleteDebt(debt)
         }
+    }
+
+    fun generateAndShareReport(
+        context: Context,
+        scope: com.example.data.export.FinancialActivityScope = com.example.data.export.FinancialActivityScope.FULL_STATEMENT,
+        periodType: ReportPeriodType,
+        format: ReportFormat,
+        startTimestamp: Long,
+        endTimestamp: Long,
+        dateRangeLabel: String,
+        onComplete: (Boolean, String?) -> Unit
+    ) {
+        if (_isExporting.value) return
+        _isExporting.value = true
+        viewModelScope.launch {
+            try {
+                val reportData = exportService.prepareReportData(
+                    startTimestamp = startTimestamp,
+                    endTimestamp = endTimestamp,
+                    periodType = periodType,
+                    dateRangeLabel = dateRangeLabel,
+                    currencyCode = uiState.value.currencyCode,
+                    scope = scope
+                )
+                val file = exportService.generateAndSaveReport(context, reportData, format)
+                exportService.shareReportFile(context, file, format, dateRangeLabel)
+                _isExporting.value = false
+                onComplete(true, null)
+            } catch (e: Exception) {
+                _isExporting.value = false
+                onComplete(false, e.message ?: "Failed to generate report")
+            }
+        }
+    }
+
+    fun copyReportForGoogleSheets(
+        context: Context,
+        scope: com.example.data.export.FinancialActivityScope = com.example.data.export.FinancialActivityScope.FULL_STATEMENT,
+        periodType: ReportPeriodType,
+        startTimestamp: Long,
+        endTimestamp: Long,
+        dateRangeLabel: String,
+        onComplete: (Boolean, String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val reportData = exportService.prepareReportData(
+                    startTimestamp = startTimestamp,
+                    endTimestamp = endTimestamp,
+                    periodType = periodType,
+                    dateRangeLabel = dateRangeLabel,
+                    currencyCode = uiState.value.currencyCode,
+                    scope = scope
+                )
+                val copied = exportService.copyTsvForGoogleSheets(context, reportData)
+                if (copied) {
+                    onComplete(true, "Copied formatted financial data to clipboard! Open Google Sheets and paste.")
+                } else {
+                    onComplete(false, "Failed to copy to clipboard.")
+                }
+            } catch (e: Exception) {
+                onComplete(false, e.message ?: "Failed to copy report data")
+            }
+        }
+    }
+
+    fun openGoogleSheets(context: Context) {
+        exportService.openGoogleSheetsAppOrWeb(context)
     }
 }

@@ -23,6 +23,9 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE userId = :userId ORDER BY isDefault DESC, name ASC")
     fun getAllAccounts(userId: String): Flow<List<AccountEntity>>
 
+    @Query("SELECT * FROM accounts WHERE userId = :userId ORDER BY isDefault DESC, name ASC")
+    suspend fun getAllAccountsList(userId: String): List<AccountEntity>
+
     @Query("SELECT * FROM accounts WHERE userId = :userId AND isDefault = 1 LIMIT 1")
     fun getDefaultAccount(userId: String): Flow<AccountEntity?>
 
@@ -65,6 +68,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE userId = :userId AND timestamp >= :startTimestamp AND timestamp <= :endTimestamp ORDER BY timestamp DESC")
     fun getTransactionsByPeriod(userId: String, startTimestamp: Long, endTimestamp: Long): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions WHERE userId = :userId AND timestamp >= :startTimestamp AND timestamp <= :endTimestamp ORDER BY timestamp DESC")
+    suspend fun getTransactionsByPeriodList(userId: String, startTimestamp: Long, endTimestamp: Long): List<TransactionEntity>
+
     @Query("SELECT * FROM transactions WHERE userId = :userId AND category = :category AND timestamp >= :startTimestamp AND timestamp <= :endTimestamp")
     suspend fun getTransactionsForCategoryPeriod(userId: String, category: String, startTimestamp: Long, endTimestamp: Long): List<TransactionEntity>
 
@@ -106,6 +112,9 @@ interface DebtDao {
     @Query("SELECT * FROM debt_ledger WHERE userId = :userId ORDER BY createdAt DESC")
     fun getAllDebts(userId: String): Flow<List<DebtLedgerEntity>>
 
+    @Query("SELECT * FROM debt_ledger WHERE userId = :userId ORDER BY createdAt DESC")
+    suspend fun getAllDebtsList(userId: String): List<DebtLedgerEntity>
+
     @Query("SELECT * FROM debt_ledger WHERE debtId = :debtId LIMIT 1")
     suspend fun getDebtById(debtId: String): DebtLedgerEntity?
 
@@ -117,6 +126,9 @@ interface DebtDao {
 
     @Query("SELECT * FROM debt_repayments ORDER BY timestamp DESC")
     fun getAllRepayments(): Flow<List<DebtRepaymentEntity>>
+
+    @Query("SELECT * FROM debt_repayments ORDER BY timestamp DESC")
+    suspend fun getAllRepaymentsList(): List<DebtRepaymentEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRepayment(repayment: DebtRepaymentEntity)

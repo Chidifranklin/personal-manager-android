@@ -32,11 +32,15 @@ import com.example.presentation.dashboard.DashboardScreen
 import com.example.presentation.dashboard.DashboardViewModel
 import com.example.presentation.finance.FinanceScreen
 import com.example.presentation.finance.FinanceViewModel
+import com.example.presentation.landing.LandingScreen
+import com.example.presentation.landing.LandingViewModel
 import com.example.presentation.navigation.Screen
 import com.example.presentation.notes.NotesScreen
 import com.example.presentation.notes.NotesViewModel
 import com.example.presentation.productivity.ProductivityScreen
 import com.example.presentation.productivity.ProductivityViewModel
+import com.example.presentation.profile.ProfileScreen
+import com.example.presentation.profile.ProfileViewModel
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : FragmentActivity() {
@@ -61,6 +65,8 @@ class MainActivity : FragmentActivity() {
         val alarmScheduler = app.alarmScheduler
         val aiService = app.aiService
         val preferenceManager = app.preferenceManager
+        val authService = app.authService
+        val firestoreSyncService = app.firestoreSyncService
 
         setContent {
             MyApplicationTheme {
@@ -104,67 +110,97 @@ class MainActivity : FragmentActivity() {
                     }
                 )
 
+                val landingViewModel: LandingViewModel = viewModel(
+                    factory = object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            LandingViewModel(authService) as T
+                    }
+                )
+
+                val profileViewModel: ProfileViewModel = viewModel(
+                    factory = object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                            ProfileViewModel(authService, repository, firestoreSyncService, preferenceManager) as T
+                    }
+                )
+
                 var currentScreen by remember { mutableStateOf(Screen.Dashboard) }
                 var showQuickActionSheet by remember { mutableStateOf(false) }
+                var showLandingScreen by remember { mutableStateOf(false) }
 
-                Scaffold(
-                    bottomBar = {
-                        NavigationBar(
-                            modifier = Modifier.testTag("main_navigation_bar")
-                        ) {
-                            Screen.values().forEach { screen ->
-                                NavigationBarItem(
-                                    selected = currentScreen == screen,
-                                    onClick = { currentScreen = screen },
-                                    icon = { Icon(screen.icon, contentDescription = screen.title) },
-                                    label = { Text(screen.title, maxLines = 1) },
-                                    modifier = Modifier.testTag("nav_item_${screen.route}")
+                if (showLandingScreen) {
+                    LandingScreen(
+                        viewModel = landingViewModel,
+                        onContinueToApp = { showLandingScreen = false }
+                    )
+                } else {
+                    Scaffold(
+                        bottomBar = {
+                            NavigationBar(
+                                modifier = Modifier.testTag("main_navigation_bar")
+                            ) {
+                                Screen.values().forEach { screen ->
+                                    NavigationBarItem(
+                                        selected = currentScreen == screen,
+                                        onClick = { currentScreen = screen },
+                                        icon = { Icon(screen.icon, contentDescription = screen.title) },
+                                        label = { Text(screen.title, maxLines = 1) },
+                                        modifier = Modifier.testTag("nav_item_${screen.route}")
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    ) { innerPadding ->
+                        Crossfade(
+                            targetState = currentScreen,
+                            modifier = Modifier.padding(innerPadding)
+                        ) { target ->
+                            when (target) {
+                                Screen.Dashboard -> DashboardScreen(
+                                    viewModel = dashboardViewModel,
+                                    onNavigateToFinance = { currentScreen = Screen.Finance },
+                                    onNavigateToProductivity = { currentScreen = Screen.Productivity },
+                                    onNavigateToAi = { currentScreen = Screen.Assistant },
+                                    onNavigateToProfile = { currentScreen = Screen.Profile },
+                                    onOpenQuickAdd = { showQuickActionSheet = true }
+                                )
+                                Screen.Finance -> FinanceScreen(
+                                    viewModel = financeViewModel
+                                )
+                                Screen.Productivity -> ProductivityScreen(
+                                    viewModel = productivityViewModel
+                                )
+                                Screen.Notes -> NotesScreen(
+                                    viewModel = notesViewModel
+                                )
+                                Screen.Assistant -> AssistantScreen(
+                                    viewModel = assistantViewModel
+                                )
+                                Screen.Profile -> ProfileScreen(
+                                    viewModel = profileViewModel,
+                                    onNavigateBack = { currentScreen = Screen.Dashboard },
+                                    onNavigateToLanding = { showLandingScreen = true }
                                 )
                             }
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                ) { innerPadding ->
-                    Crossfade(
-                        targetState = currentScreen,
-                        modifier = Modifier.padding(innerPadding)
-                    ) { target ->
-                        when (target) {
-                            Screen.Dashboard -> DashboardScreen(
-                                viewModel = dashboardViewModel,
-                                onNavigateToFinance = { currentScreen = Screen.Finance },
-                                onNavigateToProductivity = { currentScreen = Screen.Productivity },
-                                onNavigateToAi = { currentScreen = Screen.Assistant },
-                                onOpenQuickAdd = { showQuickActionSheet = true }
-                            )
-                            Screen.Finance -> FinanceScreen(
-                                viewModel = financeViewModel
-                            )
-                            Screen.Productivity -> ProductivityScreen(
-                                viewModel = productivityViewModel
-                            )
-                            Screen.Notes -> NotesScreen(
-                                viewModel = notesViewModel
-                            )
-                            Screen.Assistant -> AssistantScreen(
-                                viewModel = assistantViewModel
+
+                        if (showQuickActionSheet) {
+                            QuickActionModalSheet(
+                                onDismiss = { showQuickActionSheet = false },
+                                onSelectAction = { action ->
+                                    showQuickActionSheet = false
+                                    when (action) {
+                                        QuickActionType.FINANCE -> currentScreen = Screen.Finance
+                                        QuickActionType.PRODUCTIVITY -> currentScreen = Screen.Productivity
+                                        QuickActionType.NOTES -> currentScreen = Screen.Notes
+                                        QuickActionType.ASSISTANT -> currentScreen = Screen.Assistant
+                                    }
+                                }
                             )
                         }
-                    }
-
-                    if (showQuickActionSheet) {
-                        QuickActionModalSheet(
-                            onDismiss = { showQuickActionSheet = false },
-                            onSelectAction = { action ->
-                                showQuickActionSheet = false
-                                when (action) {
-                                    QuickActionType.FINANCE -> currentScreen = Screen.Finance
-                                    QuickActionType.PRODUCTIVITY -> currentScreen = Screen.Productivity
-                                    QuickActionType.NOTES -> currentScreen = Screen.Notes
-                                    QuickActionType.ASSISTANT -> currentScreen = Screen.Assistant
-                                }
-                            }
-                        )
                     }
                 }
             }

@@ -23,16 +23,20 @@ import com.example.data.local.entity.AccountEntity
 import com.example.data.local.entity.AccountType
 import com.example.data.local.entity.DebtDirection
 import com.example.data.local.entity.TransactionType
+import com.example.data.export.FinancialActivityScope
+import android.widget.Toast
 import com.example.data.model.DebtWithDetails
 import com.example.presentation.components.CurrencySelectionBottomSheet
 import com.example.presentation.components.DonutSlice
 import com.example.presentation.components.ExpenseDonutChart
+import com.example.presentation.components.ExportReportBottomSheet
 import com.example.presentation.components.LentVsBorrowedRatioBar
 import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
 import com.example.util.CurrencyFormatter
+import androidx.compose.ui.platform.LocalContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,6 +57,9 @@ fun FinanceScreen(
     var showRepaymentDialogForDebt by remember { mutableStateOf<DebtWithDetails?>(null) }
     var showSetBudgetDialog by remember { mutableStateOf(false) }
     var showCurrencySheet by remember { mutableStateOf(false) }
+    var showExportReportSheet by remember { mutableStateOf(false) }
+    val isExporting by viewModel.isExporting.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -87,6 +94,15 @@ fun FinanceScreen(
                                 .padding(end = 4.dp)
                                 .testTag("finance_currency_selector_chip")
                         )
+                        IconButton(
+                            onClick = { showExportReportSheet = true },
+                            modifier = Modifier.testTag("finance_export_report_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "Export Report"
+                            )
+                        }
                         IconButton(onClick = {
                             when (selectedTab) {
                                 0 -> showAddAccountDialog = true
@@ -224,6 +240,56 @@ fun FinanceScreen(
                 viewModel.setCurrencyCode(newCode)
             },
             onDismiss = { showCurrencySheet = false }
+        )
+    }
+
+    if (showExportReportSheet) {
+        val initialScope = when (selectedTab) {
+            0 -> FinancialActivityScope.ACCOUNTS_PORTFOLIO
+            1 -> FinancialActivityScope.TRANSACTIONS_ONLY
+            2 -> FinancialActivityScope.DEBT_ACTIVITIES
+            else -> FinancialActivityScope.FULL_STATEMENT
+        }
+
+        ExportReportBottomSheet(
+            currencyCode = state.currencyCode,
+            isExporting = isExporting,
+            initialScope = initialScope,
+            onDismiss = { showExportReportSheet = false },
+            onGenerateAndShare = { scope, periodType, format, startTimestamp, endTimestamp, dateRangeLabel ->
+                viewModel.generateAndShareReport(
+                    context = context,
+                    scope = scope,
+                    periodType = periodType,
+                    format = format,
+                    startTimestamp = startTimestamp,
+                    endTimestamp = endTimestamp,
+                    dateRangeLabel = dateRangeLabel
+                ) { success, errorMsg ->
+                    if (success) {
+                        showExportReportSheet = false
+                    } else if (errorMsg != null) {
+                        Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onCopyToClipboard = { scope, periodType, startTimestamp, endTimestamp, dateRangeLabel ->
+                viewModel.copyReportForGoogleSheets(
+                    context = context,
+                    scope = scope,
+                    periodType = periodType,
+                    startTimestamp = startTimestamp,
+                    endTimestamp = endTimestamp,
+                    dateRangeLabel = dateRangeLabel
+                ) { _, msg ->
+                    if (msg != null) {
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            onOpenGoogleSheets = {
+                viewModel.openGoogleSheets(context)
+            }
         )
     }
 }

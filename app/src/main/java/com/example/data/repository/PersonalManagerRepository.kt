@@ -18,12 +18,28 @@ import com.example.data.local.entity.TransactionType
 import com.example.data.model.CategoryBudgetProgress
 import com.example.data.model.DebtWithDetails
 import com.example.data.model.FinancialSummary
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
 import java.util.Calendar
 import java.util.UUID
 
+data class UserRecordCounts(
+    val accountCount: Int = 0,
+    val transactionCount: Int = 0,
+    val debtCount: Int = 0,
+    val taskCount: Int = 0,
+    val noteCount: Int = 0,
+    val budgetCount: Int = 0
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class PersonalManagerRepository(
     private val database: AppDatabase,
     var currentUserId: String = "local_default_user"
@@ -36,12 +52,22 @@ class PersonalManagerRepository(
     private val eventReminderDao = database.eventReminderDao()
     private val noteDao = database.noteDao()
 
-    // --- Accounts ---
-    val accountsFlow: Flow<List<AccountEntity>>
-        get() = accountDao.getAllAccounts(currentUserId)
+    private val _currentUserIdFlow = MutableStateFlow(currentUserId)
+    val currentUserIdFlow: StateFlow<String> = _currentUserIdFlow.asStateFlow()
 
-    val defaultAccountFlow: Flow<AccountEntity?>
-        get() = accountDao.getDefaultAccount(currentUserId)
+    fun setCurrentUser(userId: String) {
+        currentUserId = userId
+        _currentUserIdFlow.value = userId
+    }
+
+    // --- Accounts ---
+    val accountsFlow: Flow<List<AccountEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        accountDao.getAllAccounts(uid)
+    }
+
+    val defaultAccountFlow: Flow<AccountEntity?> = _currentUserIdFlow.flatMapLatest { uid ->
+        accountDao.getDefaultAccount(uid)
+    }
 
     suspend fun getAccountById(accountId: String): AccountEntity? =
         accountDao.getAccountById(accountId)
@@ -70,12 +96,20 @@ class PersonalManagerRepository(
         accountDao.deleteAccount(account)
     }
 
-    // --- Transactions ---
-    val transactionsFlow: Flow<List<TransactionEntity>>
-        get() = transactionDao.getAllTransactions(currentUserId)
+    suspend fun getAllAccountsList(): List<AccountEntity> =
+        accountDao.getAllAccountsList(currentUserId)
 
-    val recentTransactionsFlow: Flow<List<TransactionEntity>>
-        get() = transactionDao.getRecentTransactions(currentUserId, 15)
+    // --- Transactions ---
+    val transactionsFlow: Flow<List<TransactionEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        transactionDao.getAllTransactions(uid)
+    }
+
+    val recentTransactionsFlow: Flow<List<TransactionEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        transactionDao.getRecentTransactions(uid, 15)
+    }
+
+    suspend fun getTransactionsInRange(startTimestamp: Long, endTimestamp: Long): List<TransactionEntity> =
+        transactionDao.getTransactionsByPeriodList(currentUserId, startTimestamp, endTimestamp)
 
     suspend fun logTransaction(
         accountId: String,
@@ -123,8 +157,9 @@ class PersonalManagerRepository(
     }
 
     // --- Debts & Repayments (Append-Only Immutable Ledger) ---
-    val allDebtsFlow: Flow<List<DebtLedgerEntity>>
-        get() = debtDao.getAllDebts(currentUserId)
+    val allDebtsFlow: Flow<List<DebtLedgerEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        debtDao.getAllDebts(uid)
+    }
 
     val allRepaymentsFlow: Flow<List<DebtRepaymentEntity>>
         get() = debtDao.getAllRepayments()
@@ -139,6 +174,18 @@ class PersonalManagerRepository(
                 )
             }
         }
+
+    suspend fun getDebtsWithDetailsList(): List<DebtWithDetails> {
+        val debts = debtDao.getAllDebtsList(currentUserId)
+        val repayments = debtDao.getAllRepaymentsList()
+        val groupedRepayments = repayments.groupBy { it.debtId }
+        return debts.map { debt ->
+            DebtWithDetails(
+                debt = debt,
+                repayments = groupedRepayments[debt.debtId] ?: emptyList()
+            )
+        }
+    }
 
     suspend fun createDebt(
         counterpartyName: String,
@@ -236,30 +283,33 @@ class PersonalManagerRepository(
 
     // --- Financial Summary Flow ---
     val financialSummaryFlow: Flow<FinancialSummary> =
-        combine(accountDao.getLiquidCashFlow(currentUserId), debtsWithDetailsFlow) { liquidCash, debtsWithDetails ->
-            val cash = liquidCash ?: 0.0
-            var activeReceivables = 0.0
-            var activePayables = 0.0
+        _currentUserIdFlow.flatMapLatest { uid ->
+            combine(accountDao.getLiquidCashFlow(uid), debtsWithDetailsFlow) { liquidCash, debtsWithDetails ->
+                val cash = liquidCash ?: 0.0
+                var activeReceivables = 0.0
+                var activePayables = 0.0
 
-            for (item in debtsWithDetails) {
-                when (item.debt.direction) {
-                    DebtDirection.LENT -> activeReceivables += item.remainingAmount
-                    DebtDirection.BORROWED -> activePayables += item.remainingAmount
+                for (item in debtsWithDetails) {
+                    when (item.debt.direction) {
+                        DebtDirection.LENT -> activeReceivables += item.remainingAmount
+                        DebtDirection.BORROWED -> activePayables += item.remainingAmount
+                    }
                 }
-            }
 
-            val netWorth = cash + activeReceivables - activePayables
-            FinancialSummary(
-                liquidCash = cash,
-                totalReceivables = activeReceivables,
-                totalPayables = activePayables,
-                netWorth = netWorth
-            )
+                val netWorth = cash + activeReceivables - activePayables
+                FinancialSummary(
+                    liquidCash = cash,
+                    totalReceivables = activeReceivables,
+                    totalPayables = activePayables,
+                    netWorth = netWorth
+                )
+            }
         }
 
     // --- Budgets with Floor-Capped Deficit Rule ---
-    val budgetsFlow: Flow<List<BudgetEntity>>
-        get() = budgetDao.getAllBudgets(currentUserId)
+    val budgetsFlow: Flow<List<BudgetEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        budgetDao.getAllBudgets(uid)
+    }
 
     val budgetProgressFlow: Flow<List<CategoryBudgetProgress>> =
         combine(budgetsFlow, transactionsFlow) { budgets, transactions ->
@@ -313,8 +363,9 @@ class PersonalManagerRepository(
     }
 
     // --- Tasks ---
-    val tasksFlow: Flow<List<TaskEntity>>
-        get() = taskDao.getAllTasks(currentUserId)
+    val tasksFlow: Flow<List<TaskEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        taskDao.getAllTasks(uid)
+    }
 
     suspend fun createTask(
         title: String,
@@ -342,8 +393,9 @@ class PersonalManagerRepository(
     }
 
     // --- Event Reminders ---
-    val remindersFlow: Flow<List<EventReminderEntity>>
-        get() = eventReminderDao.getAllReminders(currentUserId)
+    val remindersFlow: Flow<List<EventReminderEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        eventReminderDao.getAllReminders(uid)
+    }
 
     suspend fun createReminder(
         title: String,
@@ -380,8 +432,9 @@ class PersonalManagerRepository(
     }
 
     // --- Notes & Strict Privacy Exclusion Rule for Gemini AI ---
-    val notesFlow: Flow<List<NoteEntity>>
-        get() = noteDao.getAllNotes(currentUserId)
+    val notesFlow: Flow<List<NoteEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
+        noteDao.getAllNotes(uid)
+    }
 
     // Strictly excludes isLocked = 1 notes before compiling context for Gemini
     suspend fun getUnlockedNotesForAiContext(): List<NoteEntity> {
@@ -570,5 +623,121 @@ class PersonalManagerRepository(
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
         return calendar.timeInMillis
+    }
+
+    suspend fun getUserRecordCounts(userId: String = currentUserId): UserRecordCounts {
+        val accounts = accountDao.getAllAccountsList(userId).size
+        val transactions = transactionDao.getAllTransactions(userId).firstOrNull()?.size ?: 0
+        val debts = debtDao.getAllDebtsList(userId).size
+        val tasks = taskDao.getAllTasks(userId).firstOrNull()?.size ?: 0
+        val notes = noteDao.getAllNotes(userId).firstOrNull()?.size ?: 0
+        val budgets = budgetDao.getAllBudgets(userId).firstOrNull()?.size ?: 0
+        return UserRecordCounts(accounts, transactions, debts, tasks, notes, budgets)
+    }
+
+    suspend fun wipeUserData(userId: String) {
+        database.withTransaction {
+            val accounts = accountDao.getAllAccountsList(userId)
+            accounts.forEach { accountDao.deleteAccount(it) }
+            val transactions = transactionDao.getAllTransactions(userId).firstOrNull() ?: emptyList()
+            transactions.forEach { transactionDao.deleteTransaction(it) }
+            val debts = debtDao.getAllDebtsList(userId)
+            debts.forEach { debtDao.deleteDebt(it) }
+            val tasks = taskDao.getAllTasks(userId).firstOrNull() ?: emptyList()
+            tasks.forEach { taskDao.deleteTask(it) }
+            val notes = noteDao.getAllNotes(userId).firstOrNull() ?: emptyList()
+            notes.forEach { noteDao.deleteNote(it) }
+            val budgets = budgetDao.getAllBudgets(userId).firstOrNull() ?: emptyList()
+            budgets.forEach { budgetDao.deleteBudget(it) }
+        }
+    }
+
+    suspend fun seedInitialUserDataIfEmpty(userId: String, displayName: String = "User") {
+        val accounts = accountDao.getAllAccountsList(userId)
+        if (accounts.isEmpty()) {
+            val now = System.currentTimeMillis()
+            val day = 86400000L
+
+            val primaryAccount = AccountEntity(
+                userId = userId,
+                name = "$displayName's Primary Checking",
+                type = AccountType.BANK,
+                balance = 3250.00,
+                isDefault = true
+            )
+            val savings = AccountEntity(
+                userId = userId,
+                name = "Reserve Vault",
+                type = AccountType.SAVINGS,
+                balance = 10500.00,
+                isDefault = false
+            )
+            val cash = AccountEntity(
+                userId = userId,
+                name = "Wallet Cash",
+                type = AccountType.CASH,
+                balance = 180.00,
+                isDefault = false
+            )
+            accountDao.insertAccounts(listOf(primaryAccount, savings, cash))
+
+            transactionDao.insertTransaction(
+                TransactionEntity(
+                    userId = userId,
+                    accountId = primaryAccount.accountId,
+                    type = TransactionType.INCOME,
+                    amount = 4500.0,
+                    category = "Salary & Retainer",
+                    timestamp = now - (3 * day),
+                    note = "Executive bi-weekly compensation"
+                )
+            )
+            transactionDao.insertTransaction(
+                TransactionEntity(
+                    userId = userId,
+                    accountId = primaryAccount.accountId,
+                    type = TransactionType.EXPENSE,
+                    amount = 84.50,
+                    category = "Food & Dining",
+                    timestamp = now - (1 * day),
+                    note = "Fresh pantry produce"
+                )
+            )
+            transactionDao.insertTransaction(
+                TransactionEntity(
+                    userId = userId,
+                    accountId = primaryAccount.accountId,
+                    type = TransactionType.EXPENSE,
+                    amount = 120.00,
+                    category = "Utilities",
+                    timestamp = now - (2 * day),
+                    note = "High-speed internet & power"
+                )
+            )
+
+            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Food & Dining", monthlyLimit = 400.0, allowRollover = true))
+            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Utilities", monthlyLimit = 250.0, allowRollover = false))
+            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Entertainment", monthlyLimit = 200.0, allowRollover = false))
+
+            taskDao.insertTask(
+                TaskEntity(
+                    userId = userId,
+                    title = "Review Firebase Backend & Scoped Records",
+                    description = "Verify that all accounts and notes are strictly isolated to my Google Account UID.",
+                    priority = Priority.HIGH,
+                    dueDate = now + (1 * day)
+                )
+            )
+
+            noteDao.insertNote(
+                NoteEntity(
+                    userId = userId,
+                    title = "Welcome to Personal Manager",
+                    content = "# Secure Personal Management\n\nWelcome to your private workspace. Your records are scoped strictly to your account under `/users/${'$'}userId/` on the Firebase backend.\n\n- Real-time cloud sync with Firebase\n- Google Sign-In authentication\n- Hardware biometric gate for private documents",
+                    isLocked = false,
+                    category = "Overview"
+                )
+            )
+        }
     }
 }

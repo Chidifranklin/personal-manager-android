@@ -40,6 +40,7 @@ fun DashboardScreen(
     onNavigateToFinance: () -> Unit,
     onNavigateToProductivity: () -> Unit,
     onNavigateToAi: () -> Unit,
+    onNavigateToProfile: () -> Unit = {},
     onOpenQuickAdd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -58,7 +59,7 @@ fun DashboardScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Executive Ledger & Planner",
+                            text = "Executive Ledger & Cloud Sync",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -69,7 +70,7 @@ fun DashboardScreen(
                         onClick = { showCurrencySheet = true },
                         label = {
                             Text(
-                                text = "${state.currencyCode} (${CurrencyFormatter.getCurrencySymbol(state.currencyCode)})",
+                                text = state.currencyCode,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold
                             )
@@ -83,22 +84,22 @@ fun DashboardScreen(
                             )
                         },
                         modifier = Modifier
-                            .padding(end = 6.dp)
+                            .padding(end = 4.dp)
                             .testTag("dashboard_currency_selector_chip")
                     )
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("DB Synced", style = MaterialTheme.typography.labelSmall) },
-                        leadingIcon = {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(EmeraldIncome)
-                            )
-                        },
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
+                    IconButton(
+                        onClick = onNavigateToProfile,
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .testTag("dashboard_profile_button")
+                    ) {
+                        Icon(
+                            Icons.Default.AccountCircle,
+                            contentDescription = "User Profile & Security",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
