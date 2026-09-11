@@ -80,6 +80,9 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: TransactionEntity)
 
+    @Update
+    suspend fun updateTransaction(transaction: TransactionEntity)
+
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
 }
@@ -120,6 +123,9 @@ interface DebtDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDebt(debt: DebtLedgerEntity)
+
+    @Update
+    suspend fun updateDebt(debt: DebtLedgerEntity)
 
     @Query("SELECT * FROM debt_repayments WHERE debtId = :debtId ORDER BY timestamp DESC")
     fun getRepaymentsForDebt(debtId: String): Flow<List<DebtRepaymentEntity>>

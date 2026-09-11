@@ -3,6 +3,7 @@ package com.example.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -26,6 +27,9 @@ class PreferenceManager(private val context: Context) {
 
     companion object {
         val KEY_CURRENCY_CODE = stringPreferencesKey("user_currency_code")
+        val KEY_BIOMETRIC_LOCK_ENABLED = booleanPreferencesKey("biometric_lock_enabled")
+        val KEY_BIOMETRIC_LOCK_ON_RESUME = booleanPreferencesKey("biometric_lock_on_resume")
+        val KEY_BIOMETRIC_PROTECT_FINANCE = booleanPreferencesKey("biometric_protect_finance")
 
         fun getDefaultCurrencyCode(): String {
             return try {
@@ -78,6 +82,60 @@ class PreferenceManager(private val context: Context) {
     suspend fun setCurrencyCode(currencyCode: String) {
         context.dataStore.edit { preferences ->
             preferences[KEY_CURRENCY_CODE] = currencyCode.uppercase().trim()
+        }
+    }
+
+    val biometricLockEnabledFlow: Flow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences ->
+            preferences[KEY_BIOMETRIC_LOCK_ENABLED] ?: false
+        }
+
+    val biometricLockOnResumeFlow: Flow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences ->
+            preferences[KEY_BIOMETRIC_LOCK_ON_RESUME] ?: true
+        }
+
+    val biometricProtectFinanceFlow: Flow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences ->
+            preferences[KEY_BIOMETRIC_PROTECT_FINANCE] ?: true
+        }
+
+    suspend fun setBiometricLockEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BIOMETRIC_LOCK_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setBiometricLockOnResume(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BIOMETRIC_LOCK_ON_RESUME] = enabled
+        }
+    }
+
+    suspend fun setBiometricProtectFinance(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BIOMETRIC_PROTECT_FINANCE] = enabled
         }
     }
 }

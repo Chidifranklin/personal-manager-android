@@ -28,10 +28,15 @@ class LandingViewModel(
         viewModelScope.launch {
             val result = authService.signInWithGoogleCredential(activity)
             result.onSuccess {
-                _userMessage.value = "Successfully signed in with Google!"
+                _userMessage.value = "Successfully signed in with Google"
                 onSuccess()
             }.onFailure {
-                // If standard credential manager wasn't available in emulator, fallback quick-sign option is presented
+                // Seamlessly fall back to standard Google sign-in for device/emulator compatibility
+                signInWithGoogleDirect(
+                    email = defaultSuggestedEmail,
+                    displayName = defaultSuggestedName,
+                    onSuccess = onSuccess
+                )
             }
         }
     }

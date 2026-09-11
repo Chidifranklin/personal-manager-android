@@ -241,8 +241,7 @@ class FirestoreSyncService(
             rules_version = '2';
             service cloud.firestore {
               match /databases/{database}/documents {
-                // Strict per-user isolation:
-                // Users can only view, read, and modify their own records.
+                // User document root:
                 match /users/{userId} {
                   allow read, write: if request.auth != null && request.auth.uid == userId;
                   

@@ -24,6 +24,8 @@ import com.example.presentation.components.DonutSlice
 import com.example.presentation.components.ExpenseDonutChart
 import com.example.presentation.components.LentVsBorrowedRatioBar
 import com.example.presentation.components.TrendLineChart
+import com.example.presentation.components.TrendDataPoint
+import com.example.presentation.components.AppBrandLogo
 import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
@@ -42,6 +44,7 @@ fun DashboardScreen(
     onNavigateToAi: () -> Unit,
     onNavigateToProfile: () -> Unit = {},
     onOpenQuickAdd: () -> Unit,
+    onLockApp: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -52,20 +55,41 @@ fun DashboardScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "Personal Manager",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Executive Ledger & Cloud Sync",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AppBrandLogo(size = 36.dp)
+                        Column {
+                            Text(
+                                text = "Personal Manager",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Executive Ledger & Cloud Sync",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 },
                 actions = {
+                    if (onLockApp != null) {
+                        IconButton(
+                            onClick = onLockApp,
+                            modifier = Modifier
+                                .padding(end = 2.dp)
+                                .testTag("dashboard_quick_lock_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = "Lock App with Biometrics",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     AssistChip(
                         onClick = { showCurrencySheet = true },
                         label = {
@@ -331,19 +355,62 @@ fun DashboardScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Sample responsive trend points
-                        val points = if (selectedTrendPeriod == "Weekly") {
-                            listOf(4200.0, 4350.0, 4100.0, 4600.0, 4800.0, 5050.0, state.financialSummary.netWorth)
+                        if (state.recentTransactions.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No transaction trends yet. Log transactions to view trends.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         } else {
-                            listOf(3500.0, 3900.0, 4100.0, 4400.0, 4700.0, 5200.0, state.financialSummary.netWorth)
-                        }
-                        val labels = if (selectedTrendPeriod == "Weekly") {
-                            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Today")
+                        val dateFormat = remember { SimpleDateFormat("MMM d", Locale.getDefault()) }
+                        val now = System.currentTimeMillis()
+                        val dayMs = 86400000L
+
+                        // Compute chronological trend data points moving left to right
+                        val trendDataPoints = if (selectedTrendPeriod == "Weekly") {
+                            // 7 Days from 6 days ago (left) to today (right)
+                            (6 downTo 0).map { daysAgo ->
+                                val milestoneTime = now - (daysAgo * dayMs)
+                                val dateLabel = if (daysAgo == 0) "Today" else dateFormat.format(Date(milestoneTime))
+                                val netCumulativeChange = state.recentTransactions
+                                    .filter { it.timestamp <= milestoneTime }
+                                    .sumOf { if (it.type == TransactionType.INCOME) it.amount else -it.amount }
+                                val balance = (state.financialSummary.netWorth + netCumulativeChange).coerceAtLeast(0.0)
+                                TrendDataPoint(
+                                    timestamp = milestoneTime,
+                                    dateLabel = dateLabel,
+                                    amount = balance
+                                )
+                            }
                         } else {
-                            listOf("Wk 1", "Wk 2", "Wk 3", "Wk 4")
+                            // 30 Days: 5 milestone dates across the period (left to right)
+                            listOf(28, 21, 14, 7, 0).map { daysAgo ->
+                                val milestoneTime = now - (daysAgo * dayMs)
+                                val dateLabel = if (daysAgo == 0) "Today" else dateFormat.format(Date(milestoneTime))
+                                val netCumulativeChange = state.recentTransactions
+                                    .filter { it.timestamp <= milestoneTime }
+                                    .sumOf { if (it.type == TransactionType.INCOME) it.amount else -it.amount }
+                                val balance = (state.financialSummary.netWorth + netCumulativeChange).coerceAtLeast(0.0)
+                                TrendDataPoint(
+                                    timestamp = milestoneTime,
+                                    dateLabel = dateLabel,
+                                    amount = balance
+                                )
+                            }
                         }
 
-                        TrendLineChart(points = points, labels = labels)
+                        TrendLineChart(
+                            dataPoints = trendDataPoints,
+                            currencyCode = state.currencyCode
+                        )
+                        }
                     }
                 }
             }
@@ -385,14 +452,18 @@ fun DashboardScreen(
                                 )
                             }
                         } else {
-                            listOf(
-                                DonutSlice("Groceries", 240.0, colors[0]),
-                                DonutSlice("Dining", 110.0, colors[1]),
-                                DonutSlice("Utilities", 150.0, colors[2])
-                            )
+                            emptyList()
                         }
 
                         ExpenseDonutChart(slices = slices, currencyCode = state.currencyCode)
+                        if (slices.isEmpty()) {
+                            Text(
+                                text = "No expense transactions recorded yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
                     }
                 }
             }

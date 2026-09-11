@@ -1,6 +1,6 @@
 {
   "name": "Personal Manager",
-  "description": "All-in-one personal manager backed by Firebase and Google Sign-In with strict per-user record isolation, double-entry finance, debt ledger, offline alarms, and biometric notes.",
+  "description": "All-in-one personal management operating system with Google Sign-In, strict per-user record isolation, double-entry finance, debt ledger, offline alarms, and biometric notes.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

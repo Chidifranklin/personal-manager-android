@@ -23,11 +23,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.presentation.assistant.AssistantScreen
 import com.example.presentation.assistant.AssistantViewModel
+import com.example.presentation.components.BiometricLockScreen
 import com.example.presentation.dashboard.DashboardScreen
 import com.example.presentation.dashboard.DashboardViewModel
 import com.example.presentation.finance.FinanceScreen
@@ -42,6 +47,7 @@ import com.example.presentation.productivity.ProductivityViewModel
 import com.example.presentation.profile.ProfileScreen
 import com.example.presentation.profile.ProfileViewModel
 import com.example.ui.theme.MyApplicationTheme
+import com.example.util.BiometricAuthManager
 
 class MainActivity : FragmentActivity() {
 
@@ -126,11 +132,86 @@ class MainActivity : FragmentActivity() {
                     }
                 )
 
+                val biometricLockEnabled by preferenceManager.biometricLockEnabledFlow
+                    .collectAsStateWithLifecycle(initialValue = false)
+                val biometricLockOnResume by preferenceManager.biometricLockOnResumeFlow
+                    .collectAsStateWithLifecycle(initialValue = true)
+
+                var isAppUnlocked by remember { mutableStateOf(false) }
+                var biometricErrorMessage by remember { mutableStateOf<String?>(null) }
+                var isPromptingBiometric by remember { mutableStateOf(false) }
+
+                val isAppLocked = biometricLockEnabled && !isAppUnlocked
+
+                fun triggerBiometricUnlock() {
+                    if (isPromptingBiometric) return
+                    isPromptingBiometric = true
+                    biometricErrorMessage = null
+                    try {
+                        BiometricAuthManager.authenticate(
+                            activity = this@MainActivity,
+                            title = "Personal Manager",
+                            subtitle = "Verify Fingerprint or Face",
+                            description = "Confirm your biometric credentials to unlock your private records.",
+                            allowDeviceCredential = true,
+                            onSuccess = {
+                                isAppUnlocked = true
+                                isPromptingBiometric = false
+                                biometricErrorMessage = null
+                            },
+                            onError = { _, err ->
+                                isPromptingBiometric = false
+                                biometricErrorMessage = err
+                            },
+                            onFailed = {
+                                isPromptingBiometric = false
+                                biometricErrorMessage = "Biometric not recognized. Please try again."
+                            }
+                        )
+                    } catch (e: Exception) {
+                        isPromptingBiometric = false
+                        biometricErrorMessage = e.message ?: "Authentication error"
+                    }
+                }
+
+                LaunchedEffect(isAppLocked) {
+                    if (isAppLocked) {
+                        triggerBiometricUnlock()
+                    }
+                }
+
+                var lastBackgroundTime by remember { mutableLongStateOf(0L) }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner, biometricLockEnabled, biometricLockOnResume) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_STOP) {
+                            lastBackgroundTime = System.currentTimeMillis()
+                        } else if (event == Lifecycle.Event.ON_START) {
+                            if (biometricLockEnabled && biometricLockOnResume && lastBackgroundTime > 0L) {
+                                if (System.currentTimeMillis() - lastBackgroundTime > 1000L && !isPromptingBiometric) {
+                                    isAppUnlocked = false
+                                }
+                            }
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
+
                 var currentScreen by remember { mutableStateOf(Screen.Dashboard) }
                 var showQuickActionSheet by remember { mutableStateOf(false) }
                 var showLandingScreen by remember { mutableStateOf(false) }
 
-                if (showLandingScreen) {
+                if (isAppLocked) {
+                    BiometricLockScreen(
+                        title = "Personal Manager Protected",
+                        subtitle = "Biometric authentication is required to access your financial records, balances, tasks, and notes.",
+                        errorMessage = biometricErrorMessage,
+                        onUnlockClick = { triggerBiometricUnlock() }
+                    )
+                } else if (showLandingScreen) {
                     LandingScreen(
                         viewModel = landingViewModel,
                         onContinueToApp = { showLandingScreen = false }
@@ -165,7 +246,8 @@ class MainActivity : FragmentActivity() {
                                     onNavigateToProductivity = { currentScreen = Screen.Productivity },
                                     onNavigateToAi = { currentScreen = Screen.Assistant },
                                     onNavigateToProfile = { currentScreen = Screen.Profile },
-                                    onOpenQuickAdd = { showQuickActionSheet = true }
+                                    onOpenQuickAdd = { showQuickActionSheet = true },
+                                    onLockApp = if (biometricLockEnabled) { { isAppUnlocked = false } } else null
                                 )
                                 Screen.Finance -> FinanceScreen(
                                     viewModel = financeViewModel
@@ -182,7 +264,8 @@ class MainActivity : FragmentActivity() {
                                 Screen.Profile -> ProfileScreen(
                                     viewModel = profileViewModel,
                                     onNavigateBack = { currentScreen = Screen.Dashboard },
-                                    onNavigateToLanding = { showLandingScreen = true }
+                                    onNavigateToLanding = { showLandingScreen = true },
+                                    onLockAppNow = { isAppUnlocked = false }
                                 )
                             }
                         }

@@ -27,7 +27,6 @@ data class ProfileUiState(
     val isSyncing: Boolean = false,
     val lastSyncTime: Long? = null,
     val syncStatusMessage: String? = null,
-    val securityRules: String = "",
     val actionMessage: String? = null,
     val isEditingName: Boolean = false
 )
@@ -52,7 +51,12 @@ class ProfileViewModel(
     val currencyCode: StateFlow<String> = preferenceManager.currencyCodeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PreferenceManager.getDefaultCurrencyCode())
 
-    val securityRules: String = syncService.getSecurityRulesCode()
+    val biometricLockEnabled: StateFlow<Boolean> = preferenceManager.biometricLockEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val biometricLockOnResume: StateFlow<Boolean> = preferenceManager.biometricLockOnResumeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val biometricProtectFinance: StateFlow<Boolean> = preferenceManager.biometricProtectFinanceFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     init {
         loadRecordCounts()
@@ -103,6 +107,27 @@ class ProfileViewModel(
         }
     }
 
+    fun setBiometricLockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferenceManager.setBiometricLockEnabled(enabled)
+            _actionMessage.value = if (enabled) "Biometric Lock enabled" else "Biometric Lock disabled"
+        }
+    }
+
+    fun setBiometricLockOnResume(enabled: Boolean) {
+        viewModelScope.launch {
+            preferenceManager.setBiometricLockOnResume(enabled)
+            _actionMessage.value = if (enabled) "Lock on App Resume enabled" else "Lock on App Resume disabled"
+        }
+    }
+
+    fun setBiometricProtectFinance(enabled: Boolean) {
+        viewModelScope.launch {
+            preferenceManager.setBiometricProtectFinance(enabled)
+            _actionMessage.value = if (enabled) "Financial data protection enabled" else "Financial data protection disabled"
+        }
+    }
+
     fun signOut(onSignedOut: () -> Unit) {
         authService.signOut()
         _actionMessage.value = "Signed out"
@@ -117,6 +142,14 @@ class ProfileViewModel(
             authService.deleteAccount()
             _actionMessage.value = "Account and all personal records deleted"
             onDeleted()
+        }
+    }
+
+    fun clearAllData(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deleteAllData()
+            _actionMessage.value = "All records and data deleted"
+            onComplete()
         }
     }
 

@@ -8,29 +8,37 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.auth.UserProfile
+import com.example.presentation.components.AppBrandLogo
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,14 +55,19 @@ fun LandingScreen(
     val authError by viewModel.authError.collectAsState()
     val userMessage by viewModel.userMessage.collectAsState()
 
-    var showEmailAuthDialog by remember { mutableStateOf(false) }
-    var showSecurityRulesDialog by remember { mutableStateOf(false) }
-    var showQuickGooglePicker by remember { mutableStateOf(false) }
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(userMessage) {
         userMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessage()
+        }
+    }
+
+    LaunchedEffect(authError) {
+        authError?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearMessage()
         }
@@ -67,26 +80,9 @@ fun LandingScreen(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Shield,
-                                contentDescription = "Personal Manager Logo",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        AppBrandLogo(size = 38.dp)
                         Column {
                             Text(
                                 text = "Personal Manager",
@@ -94,9 +90,10 @@ fun LandingScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Firebase Cloud Backend",
+                                text = "Executive Wealth & Vault",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
@@ -107,18 +104,23 @@ fun LandingScreen(
                             onClick = onContinueToApp,
                             modifier = Modifier
                                 .padding(end = 8.dp)
-                                .testTag("landing_enter_app_button")
+                                .testTag("landing_enter_app_button"),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Dashboard, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Dashboard, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Open App")
                         }
                     } else {
                         TextButton(
-                            onClick = { showEmailAuthDialog = true },
-                            modifier = Modifier.testTag("landing_email_signin_top_button")
+                            onClick = onContinueToApp,
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .testTag("landing_guest_header_button")
                         ) {
-                            Text("Email Login")
+                            Icon(Icons.Default.CloudOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Offline Mode")
                         }
                     }
                 },
@@ -133,809 +135,543 @@ fun LandingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(bottom = 48.dp)
+            contentPadding = PaddingValues(bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Hero Section
+            // Hero Title & Value Proposition
             item {
-                HeroBannerSection(
-                    currentUser = currentUser,
-                    isLoading = isAuthLoading,
-                    onGoogleSignIn = {
-                        activity?.let {
-                            viewModel.signInWithGoogle(it) {
-                                onContinueToApp()
-                            }
-                        } ?: run {
-                            viewModel.signInWithGoogleDirect(onSuccess = onContinueToApp)
-                        }
-                    },
-                    onQuickGooglePicker = { showQuickGooglePicker = true },
-                    onContinueToApp = onContinueToApp,
-                    onViewSecurityRules = { showSecurityRulesDialog = true }
-                )
+                HeroHeaderSection()
             }
 
-            // Trust & Architecture Badges
+            // Interactive Authentication / Active Profile Card
             item {
-                TrustBadgesRow(onBadgeClick = { showSecurityRulesDialog = true })
-            }
-
-            // Key Feature Highlights
-            item {
-                FeatureShowcaseSection()
-            }
-
-            // Security & Isolation Blueprint Card
-            item {
-                SecurityBlueprintCard(
-                    onInspectRules = { showSecurityRulesDialog = true }
-                )
-            }
-
-            // Testimonial & Data Scoping Guarantee
-            item {
-                DataPrivacyGuaranteeSection(
-                    onSignInClicked = { showQuickGooglePicker = true }
-                )
-            }
-        }
-    }
-
-    // Quick Google Account Picker Dialog
-    if (showQuickGooglePicker) {
-        QuickGoogleSignInDialog(
-            defaultEmail = viewModel.defaultSuggestedEmail,
-            defaultName = viewModel.defaultSuggestedName,
-            onDismiss = { showQuickGooglePicker = false },
-            onSelectAccount = { email, name ->
-                showQuickGooglePicker = false
-                viewModel.signInWithGoogleDirect(email, name) {
-                    onContinueToApp()
-                }
-            }
-        )
-    }
-
-    // Email & Password Auth Dialog
-    if (showEmailAuthDialog) {
-        EmailAuthDialog(
-            onDismiss = { showEmailAuthDialog = false },
-            onSignIn = { email, pass ->
-                showEmailAuthDialog = false
-                viewModel.signInWithEmail(email, pass) {
-                    onContinueToApp()
-                }
-            },
-            onSignUp = { email, pass, name ->
-                showEmailAuthDialog = false
-                viewModel.signUpWithEmail(email, pass, name) {
-                    onContinueToApp()
-                }
-            }
-        )
-    }
-
-    // Security Rules Inspector Sheet
-    if (showSecurityRulesDialog) {
-        SecurityRulesModalSheet(
-            onDismiss = { showSecurityRulesDialog = false }
-        )
-    }
-}
-
-@Composable
-private fun HeroBannerSection(
-    currentUser: com.example.data.auth.UserProfile?,
-    isLoading: Boolean,
-    onGoogleSignIn: () -> Unit,
-    onQuickGooglePicker: () -> Unit,
-    onContinueToApp: () -> Unit,
-    onViewSecurityRules: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        MaterialTheme.colorScheme.surface
-                    )
-                )
-            )
-            .padding(horizontal = 20.dp, vertical = 28.dp)
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Badge Chip
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(EmeraldIncome)
-                    )
-                    Text(
-                        text = "Firebase Firestore • Google Identity",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            // Headline
-            Text(
-                text = "Master Your Financial Ledger, Agenda & Notes with Zero Leakage.",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center,
-                lineHeight = 36.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            // Subtitle
-            Text(
-                text = "Double-entry multi-currency accounting, counterparty debt ledgers, exact offline alarms, and biometric notes — backed by Firebase with strict per-user record isolation.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 22.sp,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
-
-            Spacer(Modifier.height(4.dp))
-
-            // Action Buttons
-            if (currentUser != null) {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = currentUser.displayName.firstOrNull()?.uppercase() ?: "U",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
+                    if (currentUser != null) {
+                        ActiveProfileCard(
+                            user = currentUser!!,
+                            onEnterApp = onContinueToApp,
+                            onSwitchAccount = {
+                                activity?.let {
+                                    viewModel.signInWithGoogle(it, onContinueToApp)
+                                } ?: viewModel.signInWithGoogleDirect(onSuccess = onContinueToApp)
                             }
-                            Column {
-                                Text(
-                                    text = "Signed in as ${currentUser.displayName}",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = currentUser.email,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Button(
-                            onClick = onContinueToApp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .testTag("landing_continue_as_user_button"),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.ArrowForward, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Launch My Personal Manager")
-                        }
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Primary Google Sign-In CTA
-                    Button(
-                        onClick = onGoogleSignIn,
-                        enabled = !isLoading,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .shadow(4.dp, RoundedCornerShape(14.dp))
-                            .testTag("landing_google_signin_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
                         )
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.5.dp
-                            )
-                        } else {
-                            // Stylized Google 'G' icon badge
-                            Surface(
-                                shape = CircleShape,
-                                color = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "G",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 15.sp,
-                                        color = Color(0xFF4285F4)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = "Continue with Google",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Secondary Quick / Emulator One-Tap Sign In
-                    OutlinedButton(
-                        onClick = onQuickGooglePicker,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("landing_quick_google_button"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Select Google Profile (Demo Mode)")
-                    }
-
-                    // Guest preview
-                    TextButton(
-                        onClick = onContinueToApp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("landing_guest_preview_button")
-                    ) {
-                        Text("Explore Dashboard as Guest")
+                    } else {
+                        AuthControlCard(
+                            isLoading = isAuthLoading,
+                            onGoogleSignIn = {
+                                activity?.let {
+                                    viewModel.signInWithGoogle(it, onContinueToApp)
+                                } ?: viewModel.signInWithGoogleDirect(onSuccess = onContinueToApp)
+                            },
+                            onEmailSignIn = { email, password ->
+                                viewModel.signInWithEmail(email, password, onContinueToApp)
+                            },
+                            onEmailSignUp = { email, password, name ->
+                                viewModel.signUpWithEmail(email, password, name, onContinueToApp)
+                            },
+                            onContinueAsGuest = onContinueToApp,
+                            onForgotPassword = { showForgotPasswordDialog = true }
+                        )
                     }
                 }
             }
         }
     }
-}
 
-@Composable
-private fun TrustBadgesRow(onBadgeClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        TrustBadgeItem(icon = Icons.Default.Lock, title = "Per-User Scoped", subtitle = "No Cross-Access", onClick = onBadgeClick)
-        TrustBadgeItem(icon = Icons.Default.CloudSync, title = "Firestore Backend", subtitle = "Real-Time Sync", onClick = onBadgeClick)
-        TrustBadgeItem(icon = Icons.Default.Fingerprint, title = "Biometric Gate", subtitle = "Hardware Secure", onClick = onBadgeClick)
-    }
-}
-
-@Composable
-private fun TrustBadgeItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun FeatureShowcaseSection() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "Enterprise-Grade Personal Infrastructure",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Every module is designed for accuracy, speed, and privacy:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        FeatureCard(
-            icon = Icons.Default.AccountBalance,
-            title = "Double-Entry Finance & Currencies",
-            description = "Track liquid pools across Cash, Bank, and Savings accounts. Instant currency conversions for 24 global currencies.",
-            accentColor = EmeraldIncome
-        )
-
-        FeatureCard(
-            icon = Icons.Default.Handshake,
-            title = "Counterparty Debt Ledger",
-            description = "Append-only immutable record of money lent and borrowed. Track repayment settlements with balance updates.",
-            accentColor = VioletReceivable
-        )
-
-        FeatureCard(
-            icon = Icons.Default.Alarm,
-            title = "Precision Alarms & Productivity",
-            description = "Offline exact alarms that ring even through device reboots. Priority-tiered task checklists with calendar export.",
-            accentColor = MaterialTheme.colorScheme.primary
-        )
-
-        FeatureCard(
-            icon = Icons.Default.Description,
-            title = "Biometric Markdown Vault",
-            description = "Private notes with optional fingerprint and PIN security. Locked notes are strictly isolated and hidden from AI scans.",
-            accentColor = AmberPayable
-        )
-
-        FeatureCard(
-            icon = Icons.Default.FileDownload,
-            title = "Export Statements: PDF, Excel & Google Sheets",
-            description = "Generate clean paginated PDF audit statements, native Microsoft Excel (.xlsx) workbooks with SUM formulas, universal CSVs, or one-tap Google Sheets sync.",
-            accentColor = Color(0xFF107C41)
-        )
-    }
-}
-
-@Composable
-private fun FeatureCard(
-    icon: ImageVector,
-    title: String,
-    description: String,
-    accentColor: Color
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accentColor.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = title, tint = accentColor, modifier = Modifier.size(24.dp))
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecurityBlueprintCard(onInspectRules: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+    if (showForgotPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { showForgotPasswordDialog = false },
+            icon = {
+                Icon(Icons.Default.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            },
+            title = {
+                Text("Password Assistance")
+            },
+            text = {
                 Text(
-                    text = "Per-User Record Isolation Guarantee",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    "You can sign in instantly using your Google account, or check your registered email inbox for access verification. For complete privacy, local offline mode is also always available without any credentials.",
+                    style = MaterialTheme.typography.bodyMedium
                 )
+            },
+            confirmButton = {
+                Button(onClick = { showForgotPasswordDialog = false }) {
+                    Text("Understood")
+                }
             }
-
-            Text(
-                text = "Under the Firebase backend architecture, every document is partitioned under /users/{userId}/. Firestore security rules strictly evaluate that request.auth.uid == userId. Cross-user leaks or unauthorized modifications are physically prevented by the Firebase security engine.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 18.sp
-            )
-
-            OutlinedButton(
-                onClick = onInspectRules,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("landing_view_rules_button")
-            ) {
-                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Inspect Firebase Security Rules")
-            }
-        }
+        )
     }
 }
 
 @Composable
-private fun DataPrivacyGuaranteeSection(onSignInClicked: () -> Unit) {
+private fun HeroHeaderSection() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 20.dp),
+            .padding(horizontal = 24.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "Ready to take complete control of your records?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            text = "Sign in securely with Google to enable automatic cloud backup, record synchronization, and end-to-end device privacy.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        FilledTonalButton(
-            onClick = onSignInClicked,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.testTag("landing_bottom_get_started_button")
+        // Authentic Executive Brand Logo
+        AppBrandLogo(size = 64.dp, elevation = 4.dp)
+
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
         ) {
-            Icon(Icons.Default.Login, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Get Started with Google")
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(EmeraldIncome)
+                )
+                Text(
+                    text = "Encrypted Cloud Sync & Biometric Security",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
+
+        Text(
+            text = "Master Your Financial Ledger, Agenda & Notes in Total Privacy",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center,
+            lineHeight = 34.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Text(
+            text = "A unified operating system for double-entry multi-currency accounting, counterparty debt balances, exact alarms, and encrypted biometric notes.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 22.sp,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
     }
 }
 
 @Composable
-fun QuickGoogleSignInDialog(
-    defaultEmail: String,
-    defaultName: String,
-    onDismiss: () -> Unit,
-    onSelectAccount: (String, String) -> Unit
+private fun AuthControlCard(
+    isLoading: Boolean,
+    onGoogleSignIn: () -> Unit,
+    onEmailSignIn: (String, String) -> Unit,
+    onEmailSignUp: (String, String, String) -> Unit,
+    onContinueAsGuest: () -> Unit,
+    onForgotPassword: () -> Unit
 ) {
-    var customEmail by remember { mutableStateOf("") }
-    var customName by remember { mutableStateOf("") }
-    var showCustomInput by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("G", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
-                }
-                Text("Google Sign-In")
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "Select an authenticated Google account for testing user isolation and Firebase syncing:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // Primary user card (Detected from prompt/metadata)
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onSelectAccount(defaultEmail, defaultName) }
-                        .testTag("quick_google_primary_account")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = defaultName.first().toString(),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(defaultName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                            Text(defaultEmail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldIncome)
-                    }
-                }
-
-                // Alternate demo user (to test user record separation)
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onSelectAccount("alex.developer@gmail.com", "Alex River") }
-                        .testTag("quick_google_secondary_account")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(VioletReceivable),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("A", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Alex River (Test Isolation)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                            Text("alex.developer@gmail.com", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-
-                if (!showCustomInput) {
-                    TextButton(
-                        onClick = { showCustomInput = true },
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    ) {
-                        Text("Sign in with another Google Email...")
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        label = { Text("Display Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = customEmail,
-                        onValueChange = { customEmail = it },
-                        label = { Text("Google Email") },
-                        placeholder = { Text("user@gmail.com") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Button(
-                        onClick = {
-                            if (customEmail.isNotBlank()) {
-                                onSelectAccount(customEmail.trim(), customName.ifBlank { "Google User" })
-                            }
-                        },
-                        enabled = customEmail.contains("@"),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Authenticate Custom Account")
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-fun EmailAuthDialog(
-    onDismiss: () -> Unit,
-    onSignIn: (String, String) -> Unit,
-    onSignUp: (String, String, String) -> Unit
-) {
-    var isRegisterMode by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Sign In, 1: Create Account
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var isPasswordVisible by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(if (isRegisterMode) "Create Firebase Account" else "Sign In with Email")
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (isRegisterMode) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Full Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+    val focusManager = LocalFocusManager.current
+
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Segmented Tab Switcher: Sign In vs Create Account
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                contentColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .padding(4.dp)
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
+                        Text(
+                            "Sign In",
+                            fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    modifier = Modifier.testTag("landing_tab_signin")
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Text(
+                            "Create Account",
+                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    modifier = Modifier.testTag("landing_tab_signup")
+                )
+            }
+
+            // Google Sign-In Button (Official, elegant branding)
+            OutlinedButton(
+                onClick = onGoogleSignIn,
+                enabled = !isLoading,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("landing_google_signin_button")
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    GoogleBrandedLogo()
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = if (selectedTab == 0) "Sign in with Google" else "Sign up with Google",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
+            }
+
+            // Visual Divider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                )
+                Text(
+                    text = "or with email",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                )
+            }
+
+            // Input Fields
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Name field only shown on Create Account
+                AnimatedVisibility(
+                    visible = selectedTab == 1,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    OutlinedTextField(
+                        value = displayName,
+                        onValueChange = { displayName = it },
+                        label = { Text("Full Name") },
+                        placeholder = { Text("John Doe") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Next
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("landing_name_input")
+                    )
+                }
+
+                // Email field
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
                     label = { Text("Email Address") },
+                    placeholder = { Text("you@example.com") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Email, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("landing_email_input")
                 )
+
+                // Password field
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password") },
+                    placeholder = { Text("At least 6 characters") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                            Icon(
+                                imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isPasswordVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    },
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            focusManager.clearFocus()
+                            if (email.contains("@") && password.length >= 6) {
+                                if (selectedTab == 0) {
+                                    onEmailSignIn(email.trim(), password)
+                                } else {
+                                    onEmailSignUp(email.trim(), password, displayName.trim().ifBlank { "User" })
+                                }
+                            }
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("landing_password_input")
                 )
+            }
 
-                TextButton(
-                    onClick = { isRegisterMode = !isRegisterMode },
-                    modifier = Modifier.align(Alignment.End)
+            // Forgot Password Link (Sign In mode only)
+            if (selectedTab == 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    Text(if (isRegisterMode) "Have an account? Sign in" else "Need an account? Register")
+                    TextButton(
+                        onClick = onForgotPassword,
+                        modifier = Modifier.testTag("landing_forgot_password_button")
+                    ) {
+                        Text(
+                            "Forgot password?",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {
+
+            // Primary Submit Button
+            val isFormValid = email.contains("@") && password.length >= 6
             Button(
                 onClick = {
-                    if (email.isNotBlank() && password.length >= 6) {
-                        if (isRegisterMode) {
-                            onSignUp(email.trim(), password, name.ifBlank { "User" })
-                        } else {
-                            onSignIn(email.trim(), password)
-                        }
+                    focusManager.clearFocus()
+                    if (selectedTab == 0) {
+                        onEmailSignIn(email.trim(), password)
+                    } else {
+                        onEmailSignUp(email.trim(), password, displayName.trim().ifBlank { "User" })
                     }
                 },
-                enabled = email.contains("@") && password.length >= 6
+                enabled = isFormValid && !isLoading,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("landing_email_submit_button")
             ) {
-                Text(if (isRegisterMode) "Register" else "Sign In")
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (selectedTab == 0) Icons.AutoMirrored.Filled.Login else Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (selectedTab == 0) "Sign In" else "Create Account",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+
+            // Seamless Guest / Offline entry
+            FilledTonalButton(
+                onClick = onContinueAsGuest,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("landing_guest_preview_button")
+            ) {
+                Icon(Icons.Default.CloudOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Continue in Offline Mode (Instant Access)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
-    )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SecurityRulesModalSheet(onDismiss: () -> Unit) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState()
+private fun ActiveProfileCard(
+    user: UserProfile,
+    onEnterApp: () -> Unit,
+    onSwitchAccount: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(
-                    text = "Firestore Security Blueprint",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = user.displayName.firstOrNull()?.uppercase() ?: "U",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = user.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Verified",
+                            tint = EmeraldIncome,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Text(
+                        text = user.email,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Cloud Sync Active",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EmeraldIncome,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
-
-            Text(
-                text = "Personal Manager enforces zero cross-user access using authenticated Firestore rules:",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = """
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Isolated per-user document root:
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-
-      match /{allSubcollections=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-    }
-  }
-}
-                    """.trimIndent(),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Text(
-                text = "✓ Every account, transaction, debt, task, and note has a userId field.\n✓ When you log in with Google, only records matching your UID are fetched or modified.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
-            )
 
             Button(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
+                onClick = onEnterApp,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("landing_continue_as_user_button")
             ) {
-                Text("Close Inspector")
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Launch Personal Manager", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
 
-            Spacer(Modifier.height(24.dp))
+            OutlinedButton(
+                onClick = onSwitchAccount,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("landing_switch_account_button")
+            ) {
+                Icon(Icons.Default.SwitchAccount, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Switch or Re-authenticate Profile")
+            }
         }
     }
 }
+
+@Composable
+private fun GoogleBrandedLogo() {
+    Surface(
+        shape = CircleShape,
+        color = Color.White,
+        modifier = Modifier
+            .size(24.dp)
+            .shadow(1.dp, CircleShape)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "G",
+                fontWeight = FontWeight.Black,
+                fontSize = 15.sp,
+                color = Color(0xFF4285F4)
+            )
+        }
+    }
+}
+

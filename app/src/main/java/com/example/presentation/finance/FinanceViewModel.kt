@@ -42,6 +42,9 @@ class FinanceViewModel(
     private val exportService: FinancialReportExportService = FinancialReportExportService(repository)
 ) : ViewModel() {
 
+    val biometricProtectFinance: StateFlow<Boolean> = preferenceManager.biometricProtectFinanceFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     private val _isExporting = MutableStateFlow(false)
     val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
 
@@ -118,15 +121,56 @@ class FinanceViewModel(
         }
     }
 
+    fun deleteBudget(budget: com.example.data.local.entity.BudgetEntity) {
+        viewModelScope.launch {
+            repository.deleteBudget(budget)
+        }
+    }
+
     fun deleteTransaction(transaction: TransactionEntity) {
         viewModelScope.launch {
             repository.deleteTransaction(transaction)
         }
     }
 
+    fun updateTransaction(
+        oldTransaction: TransactionEntity,
+        newAccountId: String,
+        newType: TransactionType,
+        newAmount: Double,
+        newCategory: String,
+        newNote: String?,
+        newTimestamp: Long = oldTransaction.timestamp
+    ) {
+        viewModelScope.launch {
+            repository.updateTransaction(
+                oldTransaction = oldTransaction,
+                newAccountId = newAccountId,
+                newType = newType,
+                newAmount = newAmount,
+                newCategory = newCategory,
+                newNote = newNote,
+                newTimestamp = newTimestamp
+            )
+        }
+    }
+
     fun deleteDebt(debt: DebtLedgerEntity) {
         viewModelScope.launch {
             repository.deleteDebt(debt)
+        }
+    }
+
+    fun updateDebt(
+        debt: DebtLedgerEntity,
+        counterparty: String,
+        direction: DebtDirection,
+        amount: Double,
+        dueDate: Long?,
+        note: String?
+    ) {
+        viewModelScope.launch {
+            repository.updateDebt(debt, counterparty, direction, amount, dueDate, note)
         }
     }
 

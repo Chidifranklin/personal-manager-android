@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <!-- Outer Rounded Base Shield -->
+    <path
+        android:pathData="M48,6 C68,6 86,16 86,36 C86,64 56,86 48,90 C40,86 10,64 10,36 C10,16 28,6 48,6 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="10"
+                android:startY="6"
+                android:endX="86"
+                android:endY="90"
+                android:type="linear">
+                <item android:color="#1A365D" android:offset="0.0" />
+                <item android:color="#0F223D" android:offset="0.5" />
+                <item android:color="#0A1628" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Shield Bevel Border in Champagne Gold -->
+    <path
+        android:pathData="M48,8 C66.5,8 83,17.5 83,36 C83,62 55,83 48,87 C41,83 13,62 13,36 C13,17.5 29.5,8 48,8 Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#D4AF37"
+        android:fillColor="#00000000" />
+
+    <!-- Inner Core Shield / Vault Facet -->
+    <path
+        android:pathData="M48,16 C62,16 74,24 74,38 C74,58 53,74 48,78 C43,74 22,58 22,38 C22,24 34,16 48,16 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="22"
+                android:startY="16"
+                android:endX="74"
+                android:endY="78"
+                android:type="linear">
+                <item android:color="#2B4C7E" android:offset="0.0" />
+                <item android:color="#1A365D" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Upward Ascending Financial Bars (Left to Right) -->
+    <!-- Bar 1 (Left) -->
+    <path
+        android:pathData="M32,54 L38,54 L38,62 L32,62 Z"
+        android:fillColor="#60A5FA" />
+
+    <!-- Bar 2 (Middle-Left) -->
+    <path
+        android:pathData="M41,46 L47,46 L47,62 L41,62 Z"
+        android:fillColor="#38BDF8" />
+
+    <!-- Bar 3 (Middle-Right) -->
+    <path
+        android:pathData="M50,38 L56,38 L56,62 L50,62 Z"
+        android:fillColor="#34D399" />
+
+    <!-- Bar 4 (Right Peak) -->
+    <path
+        android:pathData="M59,28 L65,28 L65,62 L59,62 Z"
+        android:fillColor="#10B981" />
+
+    <!-- Upward Ascending Trend Line Surging Across Bars with Arrow -->
+    <path
+        android:pathData="M30,52 L44,43 L53,35 L64,24"
+        android:strokeWidth="3.2"
+        android:strokeColor="#F59E0B"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Arrow head pointing up and right -->
+    <path
+        android:pathData="M57,23 L65,23 L65,31"
+        android:strokeWidth="3.2"
+        android:strokeColor="#F59E0B"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Central Executive Security Vault Ring -->
+    <path
+        android:pathData="M48,64 A4.5,4.5 0 1,0 48,73 A4.5,4.5 0 1,0 48,64 Z"
+        android:fillColor="#FBBF24" />
+
+    <!-- Keyhole / Core Lock Dot -->
+    <path
+        android:pathData="M46.8,68.5 L49.2,68.5 L49.5,71.5 L46.5,71.5 Z"
+        android:fillColor="#1A365D" />
+
+    <!-- Top Crown / Platinum Monogram Accent -->
+    <path
+        android:pathData="M42,20 L48,15 L54,20 L48,22 Z"
+        android:fillColor="#FDFBF7" />
+
+</vector>

@@ -61,12 +61,20 @@ class FirebaseAuthService(
     private fun initFirebaseSafely() {
         try {
             if (FirebaseApp.getApps(context).isEmpty()) {
-                val options = FirebaseOptions.Builder()
-                    .setApplicationId("com.aistudio.personalmanager.pmapp")
-                    .setProjectId("personal-manager-app")
-                    .setApiKey("AIzaSyPersonalManagerFallbackApiKeyForDevContainer")
-                    .build()
-                FirebaseApp.initializeApp(context, options)
+                val app = try {
+                    FirebaseApp.initializeApp(context)
+                } catch (_: Exception) {
+                    null
+                }
+                if (app == null) {
+                    val options = FirebaseOptions.Builder()
+                        .setApplicationId("1:270171091135:android:7250e30abcf58242c7960a")
+                        .setProjectId("personal-manager-2a0db")
+                        .setApiKey("AIzaSyAcG4LEfB8hoIIa39hzVl0gPtX3zivgEfo")
+                        .setStorageBucket("personal-manager-2a0db.firebasestorage.app")
+                        .build()
+                    FirebaseApp.initializeApp(context, options)
+                }
             }
             firebaseAuthInstance = FirebaseAuth.getInstance()
             firebaseAuthInstance?.addAuthStateListener { auth ->

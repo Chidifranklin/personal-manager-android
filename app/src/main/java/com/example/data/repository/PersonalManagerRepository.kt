@@ -18,6 +18,7 @@ import com.example.data.local.entity.TransactionType
 import com.example.data.model.CategoryBudgetProgress
 import com.example.data.model.DebtWithDetails
 import com.example.data.model.FinancialSummary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.UUID
 
@@ -156,6 +158,48 @@ class PersonalManagerRepository(
         }
     }
 
+    suspend fun updateTransaction(
+        oldTransaction: TransactionEntity,
+        newAccountId: String,
+        newType: TransactionType,
+        newAmount: Double,
+        newCategory: String,
+        newNote: String?,
+        newTimestamp: Long = oldTransaction.timestamp
+    ): TransactionEntity {
+        return database.withTransaction {
+            // Revert old transaction effect on old account
+            val oldAccount = accountDao.getAccountById(oldTransaction.accountId)
+            if (oldAccount != null) {
+                val revertedBalance = when (oldTransaction.type) {
+                    TransactionType.INCOME -> oldAccount.balance - oldTransaction.amount
+                    TransactionType.EXPENSE -> oldAccount.balance + oldTransaction.amount
+                }
+                accountDao.updateAccountBalance(oldTransaction.accountId, revertedBalance)
+            }
+
+            // Apply new transaction effect on target account
+            val targetAccount = accountDao.getAccountById(newAccountId)
+                ?: throw IllegalArgumentException("Target account not found")
+            val newBalance = when (newType) {
+                TransactionType.INCOME -> targetAccount.balance + newAmount
+                TransactionType.EXPENSE -> targetAccount.balance - newAmount
+            }
+            accountDao.updateAccountBalance(newAccountId, newBalance)
+
+            val updated = oldTransaction.copy(
+                accountId = newAccountId,
+                type = newType,
+                amount = newAmount,
+                category = newCategory,
+                note = newNote,
+                timestamp = newTimestamp
+            )
+            transactionDao.updateTransaction(updated)
+            updated
+        }
+    }
+
     // --- Debts & Repayments (Append-Only Immutable Ledger) ---
     val allDebtsFlow: Flow<List<DebtLedgerEntity>> = _currentUserIdFlow.flatMapLatest { uid ->
         debtDao.getAllDebts(uid)
@@ -279,6 +323,25 @@ class PersonalManagerRepository(
 
     suspend fun deleteDebt(debt: DebtLedgerEntity) {
         debtDao.deleteDebt(debt)
+    }
+
+    suspend fun updateDebt(
+        debt: DebtLedgerEntity,
+        counterpartyName: String,
+        direction: DebtDirection,
+        principalAmount: Double,
+        dueDate: Long?,
+        note: String?
+    ) {
+        val updated = debt.copy(
+            counterpartyName = counterpartyName,
+            direction = direction,
+            principalAmount = principalAmount,
+            dueDate = dueDate,
+            note = note,
+            syncStatus = SyncStatus.DIRTY_LOCAL
+        )
+        debtDao.updateDebt(updated)
     }
 
     // --- Financial Summary Flow ---
@@ -427,6 +490,10 @@ class PersonalManagerRepository(
         eventReminderDao.deleteReminder(reminder)
     }
 
+    suspend fun updateReminder(reminder: EventReminderEntity) {
+        eventReminderDao.updateReminder(reminder)
+    }
+
     suspend fun getPendingActiveReminders(): List<EventReminderEntity> {
         return eventReminderDao.getPendingActiveReminders()
     }
@@ -478,141 +545,9 @@ class PersonalManagerRepository(
         return accounts.map { it.name to it.balance }
     }
 
-    // --- Initial Seeding ---
+    // --- Initial Seeding (Disabled: no sample data) ---
     suspend fun seedInitialDataIfEmpty() {
-        val existingAccounts = accountDao.getAllAccounts(currentUserId).firstOrNull()
-        if (existingAccounts.isNullOrEmpty()) {
-            val bank = AccountEntity(
-                userId = currentUserId,
-                name = "Bank Account",
-                type = AccountType.BANK,
-                balance = 4500.0,
-                isDefault = true
-            )
-            val cash = AccountEntity(
-                userId = currentUserId,
-                name = "Cash Wallet",
-                type = AccountType.CASH,
-                balance = 350.0,
-                isDefault = false
-            )
-            val savings = AccountEntity(
-                userId = currentUserId,
-                name = "High Yield Savings",
-                type = AccountType.SAVINGS,
-                balance = 12000.0,
-                isDefault = false
-            )
-            accountDao.insertAccounts(listOf(bank, cash, savings))
-
-            // Seed sample transactions
-            val now = System.currentTimeMillis()
-            val day = 86400000L
-            val sampleTransactions = listOf(
-                TransactionEntity(
-                    userId = currentUserId,
-                    accountId = bank.accountId,
-                    type = TransactionType.INCOME,
-                    amount = 3200.0,
-                    category = "Salary",
-                    timestamp = now - (3 * day),
-                    note = "Monthly payroll direct deposit"
-                ),
-                TransactionEntity(
-                    userId = currentUserId,
-                    accountId = bank.accountId,
-                    type = TransactionType.EXPENSE,
-                    amount = 85.50,
-                    category = "Groceries",
-                    timestamp = now - (2 * day),
-                    note = "Weekly groceries organic market"
-                ),
-                TransactionEntity(
-                    userId = currentUserId,
-                    accountId = cash.accountId,
-                    type = TransactionType.EXPENSE,
-                    amount = 14.25,
-                    category = "Food & Dining",
-                    timestamp = now - (1 * day),
-                    note = "Coffee and croissant"
-                ),
-                TransactionEntity(
-                    userId = currentUserId,
-                    accountId = bank.accountId,
-                    type = TransactionType.EXPENSE,
-                    amount = 120.0,
-                    category = "Utilities",
-                    timestamp = now - (4 * day),
-                    note = "High-speed internet & power"
-                )
-            )
-            sampleTransactions.forEach { transactionDao.insertTransaction(it) }
-
-            // Seed sample budgets
-            budgetDao.insertBudget(BudgetEntity(userId = currentUserId, category = "Groceries", monthlyLimit = 450.0, allowRollover = true))
-            budgetDao.insertBudget(BudgetEntity(userId = currentUserId, category = "Food & Dining", monthlyLimit = 250.0, allowRollover = false))
-            budgetDao.insertBudget(BudgetEntity(userId = currentUserId, category = "Utilities", monthlyLimit = 200.0, allowRollover = false))
-
-            // Seed sample debt (loan to counterparty)
-            val debt = DebtLedgerEntity(
-                userId = currentUserId,
-                counterpartyName = "Sarah Jenkins",
-                direction = DebtDirection.LENT,
-                principalAmount = 150.0,
-                dueDate = now + (7 * day),
-                note = "Weekend trip tickets"
-            )
-            debtDao.insertDebt(debt)
-            debtDao.insertRepayment(
-                DebtRepaymentEntity(
-                    debtId = debt.debtId,
-                    targetAccountId = bank.accountId,
-                    amountPaid = 50.0,
-                    timestamp = now - day,
-                    note = "Partial transfer repayment"
-                )
-            )
-
-            // Seed sample tasks
-            taskDao.insertTask(
-                TaskEntity(
-                    userId = currentUserId,
-                    title = "Review quarterly tax deductions",
-                    description = "Collect digital receipts and summarize itemized expenses",
-                    priority = Priority.HIGH,
-                    dueDate = now + (2 * day)
-                )
-            )
-            taskDao.insertTask(
-                TaskEntity(
-                    userId = currentUserId,
-                    title = "Schedule vehicle maintenance",
-                    description = "Oil change and tire rotation check",
-                    priority = Priority.MEDIUM,
-                    dueDate = now + (5 * day)
-                )
-            )
-
-            // Seed sample notes
-            noteDao.insertNote(
-                NoteEntity(
-                    userId = currentUserId,
-                    title = "Annual Financial Goals",
-                    content = "# 2026 Strategy\n- Maximize Roth IRA contributions\n- Keep dining expenses under \$250/mo\n- Build 6-month emergency buffer",
-                    isLocked = false,
-                    category = "Finance"
-                )
-            )
-            noteDao.insertNote(
-                NoteEntity(
-                    userId = currentUserId,
-                    title = "Banking Credentials & Safe Vault",
-                    content = "Encrypted storage for sensitive pins and backup recovery tokens.\n\n*Master key stored securely.*",
-                    isLocked = true,
-                    category = "Security"
-                )
-            )
-        }
+        // No sample data seeded
     }
 
     private fun getStartOfCurrentMonth(): Long {
@@ -653,91 +588,10 @@ class PersonalManagerRepository(
     }
 
     suspend fun seedInitialUserDataIfEmpty(userId: String, displayName: String = "User") {
-        val accounts = accountDao.getAllAccountsList(userId)
-        if (accounts.isEmpty()) {
-            val now = System.currentTimeMillis()
-            val day = 86400000L
+        // No sample data seeded
+    }
 
-            val primaryAccount = AccountEntity(
-                userId = userId,
-                name = "$displayName's Primary Checking",
-                type = AccountType.BANK,
-                balance = 3250.00,
-                isDefault = true
-            )
-            val savings = AccountEntity(
-                userId = userId,
-                name = "Reserve Vault",
-                type = AccountType.SAVINGS,
-                balance = 10500.00,
-                isDefault = false
-            )
-            val cash = AccountEntity(
-                userId = userId,
-                name = "Wallet Cash",
-                type = AccountType.CASH,
-                balance = 180.00,
-                isDefault = false
-            )
-            accountDao.insertAccounts(listOf(primaryAccount, savings, cash))
-
-            transactionDao.insertTransaction(
-                TransactionEntity(
-                    userId = userId,
-                    accountId = primaryAccount.accountId,
-                    type = TransactionType.INCOME,
-                    amount = 4500.0,
-                    category = "Salary & Retainer",
-                    timestamp = now - (3 * day),
-                    note = "Executive bi-weekly compensation"
-                )
-            )
-            transactionDao.insertTransaction(
-                TransactionEntity(
-                    userId = userId,
-                    accountId = primaryAccount.accountId,
-                    type = TransactionType.EXPENSE,
-                    amount = 84.50,
-                    category = "Food & Dining",
-                    timestamp = now - (1 * day),
-                    note = "Fresh pantry produce"
-                )
-            )
-            transactionDao.insertTransaction(
-                TransactionEntity(
-                    userId = userId,
-                    accountId = primaryAccount.accountId,
-                    type = TransactionType.EXPENSE,
-                    amount = 120.00,
-                    category = "Utilities",
-                    timestamp = now - (2 * day),
-                    note = "High-speed internet & power"
-                )
-            )
-
-            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Food & Dining", monthlyLimit = 400.0, allowRollover = true))
-            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Utilities", monthlyLimit = 250.0, allowRollover = false))
-            budgetDao.insertBudget(BudgetEntity(userId = userId, category = "Entertainment", monthlyLimit = 200.0, allowRollover = false))
-
-            taskDao.insertTask(
-                TaskEntity(
-                    userId = userId,
-                    title = "Review Firebase Backend & Scoped Records",
-                    description = "Verify that all accounts and notes are strictly isolated to my Google Account UID.",
-                    priority = Priority.HIGH,
-                    dueDate = now + (1 * day)
-                )
-            )
-
-            noteDao.insertNote(
-                NoteEntity(
-                    userId = userId,
-                    title = "Welcome to Personal Manager",
-                    content = "# Secure Personal Management\n\nWelcome to your private workspace. Your records are scoped strictly to your account under `/users/${'$'}userId/` on the Firebase backend.\n\n- Real-time cloud sync with Firebase\n- Google Sign-In authentication\n- Hardware biometric gate for private documents",
-                    isLocked = false,
-                    category = "Overview"
-                )
-            )
-        }
+    suspend fun deleteAllData() = withContext(Dispatchers.IO) {
+        database.clearAllTables()
     }
 }

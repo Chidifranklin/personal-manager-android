@@ -93,6 +93,36 @@ class ProductivityViewModel(
         }
     }
 
+    fun updateReminder(
+        context: Context,
+        reminder: EventReminderEntity,
+        title: String,
+        triggerTime: Long,
+        isCritical: Boolean,
+        exportToCalendar: Boolean
+    ) {
+        viewModelScope.launch {
+            val updated = reminder.copy(
+                title = title,
+                triggerTime = triggerTime,
+                isCritical = isCritical,
+                exportedToCalendar = exportToCalendar,
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateReminder(updated)
+            alarmScheduler.scheduleReminderAlarm(updated)
+
+            if (exportToCalendar && !reminder.exportedToCalendar) {
+                CalendarExportHelper.exportEventToCalendar(
+                    context = context,
+                    title = title,
+                    description = "Personal Manager Reminder (Alarm governed in app)",
+                    startTimeMillis = triggerTime
+                )
+            }
+        }
+    }
+
     fun snoozeReminder(eventId: String, minutes: Int) {
         viewModelScope.launch {
             repository.snoozeReminder(eventId, minutes)

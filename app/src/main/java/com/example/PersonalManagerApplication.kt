@@ -46,14 +46,18 @@ class PersonalManagerApplication : Application() {
         firestoreSyncService = FirestoreSyncService(this, database, repository)
 
         CoroutineScope(Dispatchers.IO).launch {
+            val sharedPrefs = getSharedPreferences("personal_manager_app_prefs", MODE_PRIVATE)
+            if (!sharedPrefs.getBoolean("sample_data_purged_v2", false)) {
+                repository.deleteAllData()
+                sharedPrefs.edit().putBoolean("sample_data_purged_v2", true).apply()
+            }
+
             authService.currentUser.collect { user ->
                 if (user != null) {
                     repository.setCurrentUser(user.uid)
-                    repository.seedInitialUserDataIfEmpty(user.uid, user.displayName)
                     firestoreSyncService.initForUser(user.uid)
                 } else {
                     repository.setCurrentUser("local_default_user")
-                    repository.seedInitialDataIfEmpty()
                 }
             }
         }

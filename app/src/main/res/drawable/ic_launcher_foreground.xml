@@ -1,34 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Main notebook / ledger card -->
+
+    <!-- Scaled and centered within 66dp safe zone (offset X=22, Y=22, range 64x64) -->
+    <!-- Base Shield -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M32,25 C29.8,25 28,26.8 28,29 L28,79 C28,81.2 29.8,83 32,83 L76,83 C78.2,83 80,81.2 80,79 L80,29 C80,26.8 78.2,25 76,25 L32,25 Z" />
-    <!-- Spine accent line -->
+        android:pathData="M54,23 C68,23 81,30 81,45 C81,65 59,82 54,85 C49,82 27,65 27,45 C27,30 40,23 54,23 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="27"
+                android:startY="23"
+                android:endX="81"
+                android:endY="85"
+                android:type="linear">
+                <item android:color="#FFFFFF" android:offset="0.0" />
+                <item android:color="#F1F5F9" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Shield Gold Bevel Border -->
     <path
-        android:fillColor="#E0E0E0"
-        android:pathData="M28,29 L36,29 L36,83 L28,83 Z" />
-    <!-- Golden bookmark ribbon -->
+        android:pathData="M54,25 C66.5,25 78.5,31.5 78.5,45 C78.5,63 58,79.5 54,82.5 C50,79.5 29.5,63 29.5,45 C29.5,31.5 41.5,25 54,25 Z"
+        android:strokeWidth="2.2"
+        android:strokeColor="#D4AF37"
+        android:fillColor="#00000000" />
+
+    <!-- Inner Core Sapphire Shield -->
     <path
-        android:fillColor="#FFB300"
-        android:pathData="M44,25 L54,25 L54,45 L49,41 L44,45 Z" />
-    <!-- Financial bars on ledger -->
+        android:pathData="M54,30 C63,30 72,36 72,46 C72,61 58,73 54,76 C50,73 36,61 36,46 C36,36 45,30 54,30 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="36"
+                android:startY="30"
+                android:endX="72"
+                android:endY="76"
+                android:type="linear">
+                <item android:color="#1E3A8A" android:offset="0.0" />
+                <item android:color="#0F172A" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Ascending Financial Bars (Left to Right) -->
+    <path android:pathData="M42,57 L46.5,57 L46.5,65 L42,65 Z" android:fillColor="#60A5FA" />
+    <path android:pathData="M48.5,51 L53,51 L53,65 L48.5,65 Z" android:fillColor="#38BDF8" />
+    <path android:pathData="M55,45 L59.5,45 L59.5,65 L55,65 Z" android:fillColor="#34D399" />
+    <path android:pathData="M61.5,37 L66,37 L66,65 L61.5,65 Z" android:fillColor="#10B981" />
+
+    <!-- Surging Trend Arrow Line -->
     <path
-        android:fillColor="#1565C0"
-        android:pathData="M44,52 L70,52 L70,56 L44,56 Z M44,60 L64,60 L64,64 L44,64 Z" />
-    <!-- Emerald check badge -->
-    <path
-        android:fillColor="#00C853"
-        android:pathData="M66,66 A11,11 0 1,0 66,88 A11,11 0 1,0 66,66 Z" />
-    <!-- White checkmark inside badge -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
+        android:pathData="M41,56 L50.5,49 L57,43 L65.5,34"
+        android:strokeWidth="2.8"
+        android:strokeColor="#F59E0B"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M61.5,77 L64.5,80 L70.5,73.5" />
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M60,33.5 L66,33.5 L66,39.5"
+        android:strokeWidth="2.8"
+        android:strokeColor="#F59E0B"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Vault Security Lock Ring -->
+    <path
+        android:pathData="M54,67 A3.5,3.5 0 1,0 54,74 A3.5,3.5 0 1,0 54,67 Z"
+        android:fillColor="#FBBF24" />
+
 </vector>

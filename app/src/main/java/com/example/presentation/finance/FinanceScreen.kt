@@ -12,16 +12,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import com.example.data.local.entity.AccountEntity
 import com.example.data.local.entity.AccountType
+import com.example.data.local.entity.BudgetEntity
 import com.example.data.local.entity.DebtDirection
+import com.example.data.local.entity.TransactionEntity
 import com.example.data.local.entity.TransactionType
 import com.example.data.export.FinancialActivityScope
 import android.widget.Toast
@@ -35,9 +40,11 @@ import com.example.ui.theme.AmberPayable
 import com.example.ui.theme.CrimsonExpense
 import com.example.ui.theme.EmeraldIncome
 import com.example.ui.theme.VioletReceivable
+import com.example.util.BiometricAuthManager
 import com.example.util.CurrencyFormatter
 import androidx.compose.ui.platform.LocalContext
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -58,7 +65,18 @@ fun FinanceScreen(
     var showSetBudgetDialog by remember { mutableStateOf(false) }
     var showCurrencySheet by remember { mutableStateOf(false) }
     var showExportReportSheet by remember { mutableStateOf(false) }
+
+    var editingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
+    var deletingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
+    var editingDebt by remember { mutableStateOf<DebtWithDetails?>(null) }
+    var deletingDebt by remember { mutableStateOf<DebtWithDetails?>(null) }
+    var editingBudget by remember { mutableStateOf<BudgetEntity?>(null) }
+    var deletingBudget by remember { mutableStateOf<BudgetEntity?>(null) }
+
     val isExporting by viewModel.isExporting.collectAsState()
+    val biometricProtectFinance by viewModel.biometricProtectFinance.collectAsState()
+    var isFinanceUnlocked by rememberSaveable { mutableStateOf(false) }
+    val isFinanceLocked = biometricProtectFinance && !isFinanceUnlocked
     val context = LocalContext.current
 
     Scaffold(
@@ -73,6 +91,38 @@ fun FinanceScreen(
                         )
                     },
                     actions = {
+                        if (biometricProtectFinance) {
+                            IconButton(
+                                onClick = {
+                                    if (isFinanceUnlocked) {
+                                        isFinanceUnlocked = false
+                                    } else {
+                                        val activity = context as? FragmentActivity
+                                        if (activity != null) {
+                                            BiometricAuthManager.authenticate(
+                                                activity = activity,
+                                                title = "Unlock Financial Ledger",
+                                                subtitle = "Verify Fingerprint or Face",
+                                                description = "Confirm identity to view financial balances and accounts.",
+                                                onSuccess = { isFinanceUnlocked = true },
+                                                onError = { _, err ->
+                                                    Toast.makeText(context, "Authentication: $err", Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        } else {
+                                            isFinanceUnlocked = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("finance_biometric_toggle_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isFinanceUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                                    contentDescription = if (isFinanceUnlocked) "Lock Financial Data" else "Unlock Financial Data",
+                                    tint = if (isFinanceUnlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                         AssistChip(
                             onClick = { showCurrencySheet = true },
                             label = {
@@ -103,15 +153,17 @@ fun FinanceScreen(
                                 contentDescription = "Export Report"
                             )
                         }
-                        IconButton(onClick = {
-                            when (selectedTab) {
-                                0 -> showAddAccountDialog = true
-                                1 -> showLogTransactionDialog = true
-                                2 -> showCreateDebtDialog = true
-                                3 -> showSetBudgetDialog = true
+                        if (!isFinanceLocked) {
+                            IconButton(onClick = {
+                                when (selectedTab) {
+                                    0 -> showAddAccountDialog = true
+                                    1 -> showLogTransactionDialog = true
+                                    2 -> showCreateDebtDialog = true
+                                    3 -> showSetBudgetDialog = true
+                                }
+                            }) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Item")
                             }
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Item")
                         }
                     }
                 )
@@ -127,20 +179,22 @@ fun FinanceScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    when (selectedTab) {
-                        0 -> showAddAccountDialog = true
-                        1 -> showLogTransactionDialog = true
-                        2 -> showCreateDebtDialog = true
-                        3 -> showSetBudgetDialog = true
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.testTag("finance_fab")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add")
+            if (!isFinanceLocked) {
+                FloatingActionButton(
+                    onClick = {
+                        when (selectedTab) {
+                            0 -> showAddAccountDialog = true
+                            1 -> showLogTransactionDialog = true
+                            2 -> showCreateDebtDialog = true
+                            3 -> showSetBudgetDialog = true
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.testTag("finance_fab")
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add")
+                }
             }
         },
         modifier = modifier
@@ -150,25 +204,113 @@ fun FinanceScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            when (selectedTab) {
-                0 -> AccountsTab(
-                    state = state,
-                    onSetDefault = { viewModel.setDefaultAccount(it) },
-                    onAddAccount = { showAddAccountDialog = true }
-                )
-                1 -> TransactionsTab(
-                    state = state,
-                    onDeleteTransaction = { viewModel.deleteTransaction(it) }
-                )
-                2 -> DebtLedgerTab(
-                    state = state,
-                    onRecordRepayment = { showRepaymentDialogForDebt = it },
-                    onDeleteDebt = { viewModel.deleteDebt(it.debt) }
-                )
-                3 -> BudgetsTab(
-                    state = state,
-                    onAddBudget = { showSetBudgetDialog = true }
-                )
+            if (isFinanceLocked) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 440.dp)
+                            .testTag("finance_biometric_locked_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(68.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldIncome.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Fingerprint,
+                                    contentDescription = "Biometric Lock",
+                                    modifier = Modifier.size(40.dp),
+                                    tint = EmeraldIncome
+                                )
+                            }
+
+                            Text(
+                                text = "Financial Ledger Protected",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Text(
+                                text = "Biometric authentication (fingerprint or face unlock) is enabled to protect your account balances, debts, and transaction history.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Button(
+                                onClick = {
+                                    val activity = context as? FragmentActivity
+                                    if (activity != null) {
+                                        BiometricAuthManager.authenticate(
+                                            activity = activity,
+                                            title = "Unlock Financial Ledger",
+                                            subtitle = "Verify Fingerprint or Face",
+                                            description = "Confirm identity to access your private financial accounts.",
+                                            onSuccess = {
+                                                isFinanceUnlocked = true
+                                            },
+                                            onError = { _, err ->
+                                                Toast.makeText(context, "Unlock: $err", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    } else {
+                                        isFinanceUnlocked = true
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("unlock_finance_biometric_button"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Fingerprint, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Unlock Financial Data")
+                            }
+                        }
+                    }
+                }
+            } else {
+                when (selectedTab) {
+                    0 -> AccountsTab(
+                        state = state,
+                        onSetDefault = { viewModel.setDefaultAccount(it) },
+                        onAddAccount = { showAddAccountDialog = true }
+                    )
+                    1 -> TransactionsTab(
+                        state = state,
+                        onEditTransaction = { editingTransaction = it },
+                        onDeleteTransaction = { deletingTransaction = it }
+                    )
+                    2 -> DebtLedgerTab(
+                        state = state,
+                        onRecordRepayment = { showRepaymentDialogForDebt = it },
+                        onEditDebt = { editingDebt = it },
+                        onDeleteDebt = { deletingDebt = it }
+                    )
+                    3 -> BudgetsTab(
+                        state = state,
+                        onAddBudget = { showSetBudgetDialog = true },
+                        onEditBudget = { editingBudget = it },
+                        onDeleteBudget = { deletingBudget = it }
+                    )
+                }
             }
         }
     }
@@ -229,6 +371,140 @@ fun FinanceScreen(
             onConfirm = { category, limit, allowRollover, rolloverFloor ->
                 viewModel.setBudget(category, limit, allowRollover, rolloverFloor)
                 showSetBudgetDialog = false
+            }
+        )
+    }
+
+    editingTransaction?.let { tx ->
+        EditTransactionDialog(
+            transaction = tx,
+            accounts = state.accounts,
+            currencyCode = state.currencyCode,
+            onDismiss = { editingTransaction = null },
+            onConfirm = { accountId, type, amount, category, note ->
+                viewModel.updateTransaction(
+                    oldTransaction = tx,
+                    newAccountId = accountId,
+                    newType = type,
+                    newAmount = amount,
+                    newCategory = category,
+                    newNote = note
+                )
+                editingTransaction = null
+            }
+        )
+    }
+
+    deletingTransaction?.let { tx ->
+        AlertDialog(
+            onDismissRequest = { deletingTransaction = null },
+            title = { Text("Delete Transaction") },
+            text = {
+                Text(
+                    "Are you sure you want to delete this ${tx.category} transaction for ${CurrencyFormatter.format(tx.amount, state.currencyCode)}? The amount will be automatically reverted on your account balance."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteTransaction(tx)
+                        deletingTransaction = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingTransaction = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    editingDebt?.let { item ->
+        EditDebtDialog(
+            item = item,
+            currencyCode = state.currencyCode,
+            onDismiss = { editingDebt = null },
+            onConfirm = { counterparty, direction, amount, dueDate, note ->
+                viewModel.updateDebt(
+                    debt = item.debt,
+                    counterparty = counterparty,
+                    direction = direction,
+                    amount = amount,
+                    dueDate = dueDate,
+                    note = note
+                )
+                editingDebt = null
+            }
+        )
+    }
+
+    deletingDebt?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deletingDebt = null },
+            title = { Text("Delete Debt Record") },
+            text = {
+                Text(
+                    "Are you sure you want to delete the debt record with ${item.debt.counterpartyName} (${CurrencyFormatter.format(item.debt.principalAmount, state.currencyCode)})? This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteDebt(item.debt)
+                        deletingDebt = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingDebt = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    editingBudget?.let { budget ->
+        EditBudgetDialog(
+            budget = budget,
+            currencyCode = state.currencyCode,
+            onDismiss = { editingBudget = null },
+            onConfirm = { limit, allowRollover, rolloverFloor ->
+                viewModel.setBudget(
+                    category = budget.category,
+                    limit = limit,
+                    allowRollover = allowRollover,
+                    rolloverFloor = rolloverFloor
+                )
+                editingBudget = null
+            }
+        )
+    }
+
+    deletingBudget?.let { budget ->
+        AlertDialog(
+            onDismissRequest = { deletingBudget = null },
+            title = { Text("Delete Budget") },
+            text = {
+                Text(
+                    "Are you sure you want to delete the monthly budget for \"${budget.category}\"?"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteBudget(budget)
+                        deletingBudget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingBudget = null }) { Text("Cancel") }
             }
         )
     }
@@ -353,6 +629,50 @@ fun AccountsTab(
             }
         }
 
+        if (state.accounts.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.AccountBalance,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "No accounts configured yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Add your first checking, savings, or cash wallet to begin tracking your finances.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Button(
+                            onClick = onAddAccount,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Create Account")
+                        }
+                    }
+                }
+            }
+        }
+
         items(state.accounts) { account ->
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -442,6 +762,7 @@ fun AccountsTab(
 @Composable
 fun TransactionsTab(
     state: FinanceUiState,
+    onEditTransaction: (com.example.data.local.entity.TransactionEntity) -> Unit,
     onDeleteTransaction: (com.example.data.local.entity.TransactionEntity) -> Unit
 ) {
     var filterType by remember { mutableStateOf<TransactionType?>(null) }
@@ -560,6 +881,34 @@ fun TransactionsTab(
                                 fontWeight = FontWeight.Bold,
                                 color = if (tx.type == TransactionType.INCOME) EmeraldIncome else CrimsonExpense
                             )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onEditTransaction(tx) },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("edit_tx_${tx.transactionId}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit Transaction",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteTransaction(tx) },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("delete_tx_${tx.transactionId}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = "Delete Transaction",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -577,6 +926,7 @@ fun TransactionsTab(
 fun DebtLedgerTab(
     state: FinanceUiState,
     onRecordRepayment: (DebtWithDetails) -> Unit,
+    onEditDebt: (DebtWithDetails) -> Unit,
     onDeleteDebt: (DebtWithDetails) -> Unit
 ) {
     val lentDebts = remember(state.debtsWithDetails) {
@@ -624,7 +974,9 @@ fun DebtLedgerTab(
                 DebtLedgerItemCard(
                     item = item,
                     currencyCode = state.currencyCode,
-                    onRecordRepayment = { onRecordRepayment(item) }
+                    onRecordRepayment = { onRecordRepayment(item) },
+                    onEditDebt = { onEditDebt(item) },
+                    onDeleteDebt = { onDeleteDebt(item) }
                 )
             }
         }
@@ -656,7 +1008,9 @@ fun DebtLedgerTab(
                 DebtLedgerItemCard(
                     item = item,
                     currencyCode = state.currencyCode,
-                    onRecordRepayment = { onRecordRepayment(item) }
+                    onRecordRepayment = { onRecordRepayment(item) },
+                    onEditDebt = { onEditDebt(item) },
+                    onDeleteDebt = { onDeleteDebt(item) }
                 )
             }
         }
@@ -671,7 +1025,9 @@ fun DebtLedgerTab(
 fun DebtLedgerItemCard(
     item: DebtWithDetails,
     currencyCode: String = "USD",
-    onRecordRepayment: () -> Unit
+    onRecordRepayment: () -> Unit,
+    onEditDebt: () -> Unit,
+    onDeleteDebt: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -684,7 +1040,7 @@ fun DebtLedgerItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.debt.counterpartyName,
                         style = MaterialTheme.typography.titleMedium,
@@ -695,20 +1051,53 @@ fun DebtLedgerItemCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (item.debt.dueDate != null) {
+                        Text(
+                            text = "Due: ${SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(item.debt.dueDate))}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "Remaining: ${CurrencyFormatter.format(item.remainingAmount, currencyCode)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (item.isFullySettled) EmeraldIncome else MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Principal: ${CurrencyFormatter.format(item.debt.principalAmount, currencyCode)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Remaining: ${CurrencyFormatter.format(item.remainingAmount, currencyCode)}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (item.isFullySettled) EmeraldIncome else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Principal: ${CurrencyFormatter.format(item.debt.principalAmount, currencyCode)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(
+                        onClick = onEditDebt,
+                        modifier = Modifier.size(32.dp).testTag("edit_debt_${item.debt.debtId}")
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Edit Debt",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = onDeleteDebt,
+                        modifier = Modifier.size(32.dp).testTag("delete_debt_${item.debt.debtId}")
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteOutline,
+                            contentDescription = "Delete Debt",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
 
@@ -774,7 +1163,9 @@ fun DebtLedgerItemCard(
 @Composable
 fun BudgetsTab(
     state: FinanceUiState,
-    onAddBudget: () -> Unit
+    onAddBudget: () -> Unit,
+    onEditBudget: (com.example.data.local.entity.BudgetEntity) -> Unit,
+    onDeleteBudget: (com.example.data.local.entity.BudgetEntity) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -833,16 +1224,42 @@ fun BudgetsTab(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = bp.budget.category,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "${CurrencyFormatter.format(bp.spentThisMonth, state.currencyCode)} / ${CurrencyFormatter.format(bp.effectiveLimit, state.currencyCode)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Column {
+                                Text(
+                                    text = bp.budget.category,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${CurrencyFormatter.format(bp.spentThisMonth, state.currencyCode)} / ${CurrencyFormatter.format(bp.effectiveLimit, state.currencyCode)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onEditBudget(bp.budget) },
+                                    modifier = Modifier.size(32.dp).testTag("edit_budget_${bp.budget.budgetId}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit Budget",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteBudget(bp.budget) },
+                                    modifier = Modifier.size(32.dp).testTag("delete_budget_${bp.budget.budgetId}")
+                                ) {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = "Delete Budget",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1146,6 +1563,290 @@ fun CreateDebtDialog(
                 }
             ) {
                 Text("Record Debt")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun EditTransactionDialog(
+    transaction: TransactionEntity,
+    accounts: List<AccountEntity>,
+    currencyCode: String = "USD",
+    onDismiss: () -> Unit,
+    onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?) -> Unit
+) {
+    var type by remember { mutableStateOf(transaction.type) }
+    var amountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", transaction.amount)) }
+    var category by remember { mutableStateOf(transaction.category) }
+    var note by remember { mutableStateOf(transaction.note ?: "") }
+    var selectedAccountId by remember {
+        mutableStateOf(
+            if (accounts.any { it.accountId == transaction.accountId }) transaction.accountId
+            else accounts.firstOrNull()?.accountId ?: ""
+        )
+    }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
+    val standardCategories = listOf("Groceries", "Food & Dining", "Utilities", "Salary", "Transport", "Entertainment", "Health", "Shopping")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Transaction") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row {
+                    FilterChip(
+                        selected = type == TransactionType.EXPENSE,
+                        onClick = { type = TransactionType.EXPENSE },
+                        label = { Text("Expense") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FilterChip(
+                        selected = type == TransactionType.INCOME,
+                        onClick = { type = TransactionType.INCOME },
+                        label = { Text("Income") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Amount ($symbol)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(standardCategories) { cat ->
+                        SuggestionChip(
+                            onClick = { category = cat },
+                            label = { Text(cat, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                Text("Account:", style = MaterialTheme.typography.labelMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(accounts) { acc ->
+                        FilterChip(
+                            selected = selectedAccountId == acc.accountId,
+                            onClick = { selectedAccountId = acc.accountId },
+                            label = { Text(acc.name) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note (Optional)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = amountText.toDoubleOrNull() ?: 0.0
+                    if (amt > 0 && selectedAccountId.isNotBlank()) {
+                        onConfirm(selectedAccountId, type, amt, category.trim(), note.ifBlank { null })
+                    }
+                }
+            ) {
+                Text("Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun EditDebtDialog(
+    item: DebtWithDetails,
+    currencyCode: String = "USD",
+    onDismiss: () -> Unit,
+    onConfirm: (counterparty: String, direction: DebtDirection, amount: Double, dueDate: Long?, note: String?) -> Unit
+) {
+    var counterparty by remember { mutableStateOf(item.debt.counterpartyName) }
+    var direction by remember { mutableStateOf(item.debt.direction) }
+    var amountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", item.debt.principalAmount)) }
+    var note by remember { mutableStateOf(item.debt.note ?: "") }
+    var dueDate by remember { mutableStateOf(item.debt.dueDate) }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Debt Record") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row {
+                    FilterChip(
+                        selected = direction == DebtDirection.LENT,
+                        onClick = { direction = DebtDirection.LENT },
+                        label = { Text("I Lent") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FilterChip(
+                        selected = direction == DebtDirection.BORROWED,
+                        onClick = { direction = DebtDirection.BORROWED },
+                        label = { Text("I Borrowed") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = counterparty,
+                    onValueChange = { counterparty = it },
+                    label = { Text("Person / Counterparty") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Principal Amount ($symbol)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Date Picker for Due Date
+                OutlinedCard(
+                    onClick = {
+                        val cal = Calendar.getInstance().apply {
+                            dueDate?.let { timeInMillis = it }
+                        }
+                        android.app.DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                val selectedCal = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, y)
+                                    set(Calendar.MONTH, m)
+                                    set(Calendar.DAY_OF_MONTH, d)
+                                }
+                                dueDate = selectedCal.timeInMillis
+                            },
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH),
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Due Date (Optional)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = dueDate?.let { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(it)) } ?: "No due date set (Tap to choose)",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        if (dueDate != null) {
+                            IconButton(onClick = { dueDate = null }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear date", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note / Purpose") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = amountText.toDoubleOrNull() ?: 0.0
+                    if (counterparty.isNotBlank() && amt > 0) {
+                        onConfirm(counterparty.trim(), direction, amt, dueDate, note.ifBlank { null })
+                    }
+                }
+            ) {
+                Text("Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun EditBudgetDialog(
+    budget: BudgetEntity,
+    currencyCode: String = "USD",
+    onDismiss: () -> Unit,
+    onConfirm: (limit: Double, allowRollover: Boolean, rolloverFloor: Double) -> Unit
+) {
+    var limitText by remember { mutableStateOf(String.format(Locale.US, "%.2f", budget.monthlyLimit)) }
+    var allowRollover by remember { mutableStateOf(budget.allowRollover) }
+    val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Budget: ${budget.category}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Category: ${budget.category}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                OutlinedTextField(
+                    value = limitText,
+                    onValueChange = { limitText = it },
+                    label = { Text("Monthly Limit ($symbol)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = allowRollover, onCheckedChange = { allowRollover = it })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text("Enable Surplus Rollover", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Carry forward surplus funds into next month",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val limit = limitText.toDoubleOrNull() ?: 0.0
+                    if (limit > 0) {
+                        onConfirm(limit, allowRollover, 0.0)
+                    }
+                }
+            ) {
+                Text("Save Changes")
             }
         },
         dismissButton = {
