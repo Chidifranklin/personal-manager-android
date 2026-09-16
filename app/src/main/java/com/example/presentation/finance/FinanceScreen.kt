@@ -1,13 +1,16 @@
 package com.example.presentation.finance
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -47,6 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -332,8 +336,8 @@ fun FinanceScreen(
             accounts = state.accounts,
             currencyCode = state.currencyCode,
             onDismiss = { showLogTransactionDialog = false },
-            onConfirm = { accountId, type, amount, category, note ->
-                viewModel.logTransaction(accountId, type, amount, category, note)
+            onConfirm = { accountId, type, amount, category, note, timestamp ->
+                viewModel.logTransaction(accountId, type, amount, category, note, timestamp)
                 showLogTransactionDialog = false
             }
         )
@@ -381,14 +385,15 @@ fun FinanceScreen(
             accounts = state.accounts,
             currencyCode = state.currencyCode,
             onDismiss = { editingTransaction = null },
-            onConfirm = { accountId, type, amount, category, note ->
+            onConfirm = { accountId, type, amount, category, note, timestamp ->
                 viewModel.updateTransaction(
                     oldTransaction = tx,
                     newAccountId = accountId,
                     newType = type,
                     newAmount = amount,
                     newCategory = category,
-                    newNote = note
+                    newNote = note,
+                    newTimestamp = timestamp
                 )
                 editingTransaction = null
             }
@@ -1377,41 +1382,113 @@ fun AddAccountDialog(
     )
 }
 
+private fun localMillisToUtcMidnight(localMillis: Long): Long {
+    val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+    val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+    }
+    return utcCal.timeInMillis
+}
+
+private fun utcMidnightToLocalMillis(utcMillis: Long, preserveTimeFrom: Long = System.currentTimeMillis()): Long {
+    val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    val localCal = Calendar.getInstance().apply {
+        timeInMillis = preserveTimeFrom
+        set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+        set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+        set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+    }
+    return localCal.timeInMillis
+}
+
+private fun formatTransactionDate(timestamp: Long): String {
+    val now = Calendar.getInstance()
+    val target = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val isToday = now.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+            now.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    val isYesterday = yesterday.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+            yesterday.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+
+    return when {
+        isToday -> "Today (${SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))})"
+        isYesterday -> "Yesterday (${SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))})"
+        else -> SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogTransactionDialog(
     accounts: List<AccountEntity>,
     currencyCode: String = "USD",
     onDismiss: () -> Unit,
-    onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?) -> Unit
+    onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?, timestamp: Long) -> Unit
 ) {
     var type by remember { mutableStateOf(TransactionType.EXPENSE) }
     var amountText by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("Groceries") }
     var note by remember { mutableStateOf("") }
+    var selectedTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
+    var showDatePickerDialog by remember { mutableStateOf(false) }
     var selectedAccountId by remember {
         mutableStateOf(accounts.firstOrNull { it.isDefault }?.accountId ?: accounts.firstOrNull()?.accountId ?: "")
     }
     val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
 
-    val standardCategories = listOf("Groceries", "Food & Dining", "Utilities", "Salary", "Transport", "Entertainment", "Health", "Shopping")
+    val standardCategories = if (type == TransactionType.EXPENSE) {
+        listOf("Groceries", "Food & Dining", "Utilities", "Transport", "Entertainment", "Health", "Shopping", "Housing", "Education")
+    } else {
+        listOf("Salary", "Freelance", "Investment", "Bonus", "Gift", "Refund", "Rental", "Other Income")
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log Transaction") },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    imageVector = if (type == TransactionType.INCOME) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                    contentDescription = null,
+                    tint = if (type == TransactionType.INCOME) EmeraldIncome else CrimsonExpense
+                )
+                Text(
+                    text = if (type == TransactionType.INCOME) "Record Income" else "Record Expense",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Row {
                     FilterChip(
                         selected = type == TransactionType.EXPENSE,
-                        onClick = { type = TransactionType.EXPENSE },
+                        onClick = {
+                            type = TransactionType.EXPENSE
+                            category = "Groceries"
+                        },
                         label = { Text("Expense") },
+                        leadingIcon = {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = CrimsonExpense, modifier = Modifier.size(14.dp))
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     FilterChip(
                         selected = type == TransactionType.INCOME,
-                        onClick = { type = TransactionType.INCOME },
+                        onClick = {
+                            type = TransactionType.INCOME
+                            category = "Salary"
+                        },
                         label = { Text("Income") },
+                        leadingIcon = {
+                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = EmeraldIncome, modifier = Modifier.size(14.dp))
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1421,13 +1498,111 @@ fun LogTransactionDialog(
                     onValueChange = { amountText = it },
                     label = { Text("Amount ($symbol)") },
                     placeholder = { Text("0.00") },
-                    modifier = Modifier.fillMaxWidth()
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("transaction_amount_input")
                 )
+
+                // Calendar Date Picker Integration
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Transaction Date",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Surface(
+                        onClick = { showDatePickerDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("transaction_date_picker_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarToday,
+                                        contentDescription = "Select Date",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = formatTransactionDate(selectedTimestamp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Tap to choose date from calendar",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.CalendarMonth,
+                                contentDescription = "Calendar Picker",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Quick date selector chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AssistChip(
+                            onClick = { selectedTimestamp = System.currentTimeMillis() },
+                            label = { Text("Today", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AssistChip(
+                            onClick = {
+                                val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+                                selectedTimestamp = cal.timeInMillis
+                            },
+                            label = { Text("Yesterday", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AssistChip(
+                            onClick = { showDatePickerDialog = true },
+                            label = { Text("Calendar", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
                     label = { Text("Category") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1441,7 +1616,10 @@ fun LogTransactionDialog(
                     }
                 }
 
-                Text("Deduct / Credit Account:", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = if (type == TransactionType.INCOME) "Credit Target Account:" else "Deduct Account:",
+                    style = MaterialTheme.typography.labelMedium
+                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(accounts) { acc ->
                         FilterChip(
@@ -1456,6 +1634,7 @@ fun LogTransactionDialog(
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("Optional Note") },
+                    placeholder = { Text("e.g. Receipt #, description") },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1465,9 +1644,11 @@ fun LogTransactionDialog(
                 onClick = {
                     val amt = amountText.toDoubleOrNull() ?: 0.0
                     if (amt > 0 && selectedAccountId.isNotBlank()) {
-                        onConfirm(selectedAccountId, type, amt, category.trim(), note.ifBlank { null })
+                        onConfirm(selectedAccountId, type, amt, category.trim(), note.ifBlank { null }, selectedTimestamp)
                     }
-                }
+                },
+                enabled = (amountText.toDoubleOrNull() ?: 0.0) > 0 && selectedAccountId.isNotBlank(),
+                modifier = Modifier.testTag("save_transaction_button")
             ) {
                 Text("Save")
             }
@@ -1476,6 +1657,34 @@ fun LogTransactionDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+
+    if (showDatePickerDialog) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = localMillisToUtcMidnight(selectedTimestamp)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePickerDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            selectedTimestamp = utcMidnightToLocalMillis(utcMillis, selectedTimestamp)
+                        }
+                        showDatePickerDialog = false
+                    }
+                ) {
+                    Text("Select Date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePickerDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @Composable
@@ -1571,18 +1780,21 @@ fun CreateDebtDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditTransactionDialog(
     transaction: TransactionEntity,
     accounts: List<AccountEntity>,
     currencyCode: String = "USD",
     onDismiss: () -> Unit,
-    onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?) -> Unit
+    onConfirm: (accountId: String, type: TransactionType, amount: Double, category: String, note: String?, timestamp: Long) -> Unit
 ) {
     var type by remember { mutableStateOf(transaction.type) }
     var amountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", transaction.amount)) }
     var category by remember { mutableStateOf(transaction.category) }
     var note by remember { mutableStateOf(transaction.note ?: "") }
+    var selectedTimestamp by remember { mutableStateOf(transaction.timestamp) }
+    var showDatePickerDialog by remember { mutableStateOf(false) }
     var selectedAccountId by remember {
         mutableStateOf(
             if (accounts.any { it.accountId == transaction.accountId }) transaction.accountId
@@ -1590,18 +1802,39 @@ fun EditTransactionDialog(
         )
     }
     val symbol = CurrencyFormatter.getCurrencySymbol(currencyCode)
-    val standardCategories = listOf("Groceries", "Food & Dining", "Utilities", "Salary", "Transport", "Entertainment", "Health", "Shopping")
+    val standardCategories = if (type == TransactionType.EXPENSE) {
+        listOf("Groceries", "Food & Dining", "Utilities", "Transport", "Entertainment", "Health", "Shopping", "Housing", "Education")
+    } else {
+        listOf("Salary", "Freelance", "Investment", "Bonus", "Gift", "Refund", "Rental", "Other Income")
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit Transaction") },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    imageVector = if (type == TransactionType.INCOME) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                    contentDescription = null,
+                    tint = if (type == TransactionType.INCOME) EmeraldIncome else CrimsonExpense
+                )
+                Text("Edit Transaction", fontWeight = FontWeight.Bold)
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Row {
                     FilterChip(
                         selected = type == TransactionType.EXPENSE,
                         onClick = { type = TransactionType.EXPENSE },
                         label = { Text("Expense") },
+                        leadingIcon = {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = CrimsonExpense, modifier = Modifier.size(14.dp))
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -1609,6 +1842,9 @@ fun EditTransactionDialog(
                         selected = type == TransactionType.INCOME,
                         onClick = { type = TransactionType.INCOME },
                         label = { Text("Income") },
+                        leadingIcon = {
+                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = EmeraldIncome, modifier = Modifier.size(14.dp))
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1617,13 +1853,111 @@ fun EditTransactionDialog(
                     value = amountText,
                     onValueChange = { amountText = it },
                     label = { Text("Amount ($symbol)") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Calendar Date Picker Integration
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Transaction Date",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Surface(
+                        onClick = { showDatePickerDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("edit_transaction_date_picker_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarToday,
+                                        contentDescription = "Select Date",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = formatTransactionDate(selectedTimestamp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Tap to choose date from calendar",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.CalendarMonth,
+                                contentDescription = "Calendar Picker",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Quick date selector chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AssistChip(
+                            onClick = { selectedTimestamp = System.currentTimeMillis() },
+                            label = { Text("Today", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AssistChip(
+                            onClick = {
+                                val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+                                selectedTimestamp = cal.timeInMillis
+                            },
+                            label = { Text("Yesterday", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AssistChip(
+                            onClick = { showDatePickerDialog = true },
+                            label = { Text("Calendar", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
                     label = { Text("Category") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1636,13 +1970,16 @@ fun EditTransactionDialog(
                     }
                 }
 
-                Text("Account:", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = if (type == TransactionType.INCOME) "Target Account:" else "Account:",
+                    style = MaterialTheme.typography.labelMedium
+                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(accounts) { acc ->
                         FilterChip(
                             selected = selectedAccountId == acc.accountId,
                             onClick = { selectedAccountId = acc.accountId },
-                            label = { Text(acc.name) }
+                            label = { Text("${acc.name} (${CurrencyFormatter.format(acc.balance, currencyCode)})") }
                         )
                     }
                 }
@@ -1660,9 +1997,10 @@ fun EditTransactionDialog(
                 onClick = {
                     val amt = amountText.toDoubleOrNull() ?: 0.0
                     if (amt > 0 && selectedAccountId.isNotBlank()) {
-                        onConfirm(selectedAccountId, type, amt, category.trim(), note.ifBlank { null })
+                        onConfirm(selectedAccountId, type, amt, category.trim(), note.ifBlank { null }, selectedTimestamp)
                     }
-                }
+                },
+                enabled = (amountText.toDoubleOrNull() ?: 0.0) > 0 && selectedAccountId.isNotBlank()
             ) {
                 Text("Save Changes")
             }
@@ -1671,6 +2009,34 @@ fun EditTransactionDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+
+    if (showDatePickerDialog) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = localMillisToUtcMidnight(selectedTimestamp)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePickerDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            selectedTimestamp = utcMidnightToLocalMillis(utcMillis, selectedTimestamp)
+                        }
+                        showDatePickerDialog = false
+                    }
+                ) {
+                    Text("Select Date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePickerDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @Composable

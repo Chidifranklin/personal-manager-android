@@ -24,7 +24,7 @@ import com.example.ui.theme.EmeraldIncome
 
 @Composable
 fun BiometricLockScreen(
-    title: String = "App Locked",
+    title: String = "Unlock to access Personal Manager",
     subtitle: String = "Biometric authentication is required to access your financial records, balances, tasks, and notes.",
     errorMessage: String? = null,
     onUnlockClick: () -> Unit,

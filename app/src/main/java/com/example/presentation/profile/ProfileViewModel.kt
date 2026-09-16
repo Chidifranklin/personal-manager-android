@@ -153,13 +153,6 @@ class ProfileViewModel(
         }
     }
 
-    fun switchUserQuick(email: String, name: String) {
-        viewModelScope.launch {
-            authService.signInWithGoogleAccount(email, name)
-            _actionMessage.value = "Switched to $name ($email)"
-        }
-    }
-
     private val exportService = FinancialReportExportService(repository)
 
     private val _isExporting = MutableStateFlow(false)

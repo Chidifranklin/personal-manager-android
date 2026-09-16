@@ -1,6 +1,9 @@
 package com.example.presentation.landing
 
+import android.accounts.AccountManager
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -37,6 +40,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.auth.DeviceGoogleAccount
 import com.example.data.auth.UserProfile
 import com.example.presentation.components.AppBrandLogo
 import com.example.ui.theme.*
@@ -56,6 +60,25 @@ fun LandingScreen(
     val userMessage by viewModel.userMessage.collectAsState()
 
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
+    var showGoogleAccountChooser by remember { mutableStateOf(false) }
+    var deviceAccounts by remember { mutableStateOf<List<DeviceGoogleAccount>>(emptyList()) }
+
+    val systemAccountChooserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val selectedEmail = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+            if (!selectedEmail.isNullOrBlank()) {
+                val name = selectedEmail.substringBefore("@")
+                    .replace(".", " ")
+                    .replace("_", " ")
+                    .split(" ")
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                viewModel.signInWithGoogleAccount(selectedEmail, name, onContinueToApp)
+            }
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -155,18 +178,15 @@ fun LandingScreen(
                             user = currentUser!!,
                             onEnterApp = onContinueToApp,
                             onSwitchAccount = {
-                                activity?.let {
-                                    viewModel.signInWithGoogle(it, onContinueToApp)
-                                } ?: viewModel.signInWithGoogleDirect(onSuccess = onContinueToApp)
+                                viewModel.signOut()
                             }
                         )
                     } else {
                         AuthControlCard(
                             isLoading = isAuthLoading,
                             onGoogleSignIn = {
-                                activity?.let {
-                                    viewModel.signInWithGoogle(it, onContinueToApp)
-                                } ?: viewModel.signInWithGoogleDirect(onSuccess = onContinueToApp)
+                                deviceAccounts = viewModel.getDeviceGoogleAccounts()
+                                showGoogleAccountChooser = true
                             },
                             onEmailSignIn = { email, password ->
                                 viewModel.signInWithEmail(email, password, onContinueToApp)
@@ -181,6 +201,32 @@ fun LandingScreen(
                 }
             }
         }
+    }
+
+    if (showGoogleAccountChooser) {
+        GoogleAccountChooserDialog(
+            accounts = deviceAccounts,
+            isLoading = isAuthLoading,
+            onSelectAccount = { acc ->
+                showGoogleAccountChooser = false
+                viewModel.signInWithGoogleAccount(acc.email, acc.displayName, onContinueToApp)
+            },
+            onAddAnotherAccount = { email, name ->
+                showGoogleAccountChooser = false
+                viewModel.signInWithGoogleAccount(email, name, onContinueToApp)
+            },
+            onLaunchSystemChooser = {
+                val intent = viewModel.getSystemAccountChooserIntent()
+                if (intent != null) {
+                    try {
+                        systemAccountChooserLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        // System chooser fallback
+                    }
+                }
+            },
+            onDismiss = { showGoogleAccountChooser = false }
+        )
     }
 
     if (showForgotPasswordDialog) {
@@ -392,7 +438,7 @@ private fun AuthControlCard(
                         value = displayName,
                         onValueChange = { displayName = it },
                         label = { Text("Full Name") },
-                        placeholder = { Text("John Doe") },
+                        placeholder = { Text("Your Full Name") },
                         leadingIcon = {
                             Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         },
@@ -416,7 +462,7 @@ private fun AuthControlCard(
                     value = email,
                     onValueChange = { email = it },
                     label = { Text("Email Address") },
-                    placeholder = { Text("you@example.com") },
+                    placeholder = { Text("name@email.com") },
                     leadingIcon = {
                         Icon(Icons.Default.Email, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     },
@@ -674,4 +720,202 @@ private fun GoogleBrandedLogo() {
         }
     }
 }
+
+@Composable
+fun GoogleAccountChooserDialog(
+    accounts: List<DeviceGoogleAccount>,
+    isLoading: Boolean,
+    onSelectAccount: (DeviceGoogleAccount) -> Unit,
+    onAddAnotherAccount: (email: String, name: String) -> Unit,
+    onLaunchSystemChooser: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showAddAccountFields by remember { mutableStateOf(accounts.isEmpty()) }
+    var newAccountEmail by remember { mutableStateOf("") }
+    var newAccountName by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                GoogleBrandedLogo()
+                Column {
+                    Text(
+                        text = "Choose an account",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "to continue to Personal Manager",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (accounts.isNotEmpty()) {
+                    Text(
+                        text = "Google accounts on this device:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        accounts.forEach { acc ->
+                            Surface(
+                                onClick = { onSelectAccount(acc) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("google_account_${acc.email}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF4285F4)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = acc.displayName.firstOrNull()?.uppercase() ?: "G",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = acc.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = acc.email,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = "Select",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!showAddAccountFields && accounts.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { showAddAccountFields = true },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("use_another_google_account_button")
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Use another Google account")
+                    }
+                } else {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = if (accounts.isEmpty()) "Enter your Google account details to sign in:" else "Add another Google account:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = newAccountEmail,
+                                onValueChange = { newAccountEmail = it },
+                                label = { Text("Google Account Email") },
+                                placeholder = { Text("name@gmail.com") },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("google_account_new_email_input")
+                            )
+                            OutlinedTextField(
+                                value = newAccountName,
+                                onValueChange = { newAccountName = it },
+                                label = { Text("Display Name") },
+                                placeholder = { Text("Your Name") },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("google_account_new_name_input")
+                            )
+                            Button(
+                                onClick = {
+                                    val cleanEmail = newAccountEmail.trim()
+                                    val cleanName = newAccountName.trim().ifBlank { cleanEmail.substringBefore("@") }
+                                    if (cleanEmail.contains("@")) {
+                                        onAddAnotherAccount(cleanEmail, cleanName)
+                                    }
+                                },
+                                enabled = newAccountEmail.trim().contains("@") && !isLoading,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Sign In with this Google Account")
+                            }
+                        }
+                    }
+                }
+
+                // System account picker option
+                TextButton(
+                    onClick = onLaunchSystemChooser,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Icon(Icons.Default.Android, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("System Account Chooser", style = MaterialTheme.typography.labelMedium)
+                }
+
+                Text(
+                    text = "To continue, Google will securely link your selected account with Firebase Authentication for Personal Manager.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 14.sp
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 

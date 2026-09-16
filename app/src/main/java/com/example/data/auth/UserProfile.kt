@@ -11,3 +11,10 @@ data class UserProfile(
     val createdAt: Long = System.currentTimeMillis(),
     val lastLoginAt: Long = System.currentTimeMillis()
 )
+
+data class DeviceGoogleAccount(
+    val email: String,
+    val displayName: String,
+    val photoUrl: String? = null
+)
+

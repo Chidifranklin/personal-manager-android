@@ -90,9 +90,16 @@ class FinanceViewModel(
         }
     }
 
-    fun logTransaction(accountId: String, type: TransactionType, amount: Double, category: String, note: String?) {
+    fun logTransaction(
+        accountId: String,
+        type: TransactionType,
+        amount: Double,
+        category: String,
+        note: String?,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
         viewModelScope.launch {
-            repository.logTransaction(accountId, type, amount, category, note)
+            repository.logTransaction(accountId, type, amount, category, note, timestamp)
         }
     }
 

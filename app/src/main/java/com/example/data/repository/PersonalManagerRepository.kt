@@ -118,7 +118,8 @@ class PersonalManagerRepository(
         type: TransactionType,
         amount: Double,
         category: String,
-        note: String? = null
+        note: String? = null,
+        timestamp: Long = System.currentTimeMillis()
     ): TransactionEntity {
         return database.withTransaction {
             val account = accountDao.getAccountById(accountId)
@@ -136,6 +137,7 @@ class PersonalManagerRepository(
                 type = type,
                 amount = amount,
                 category = category,
+                timestamp = timestamp,
                 note = note
             )
             transactionDao.insertTransaction(transaction)

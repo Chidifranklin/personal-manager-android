@@ -150,9 +150,9 @@ class MainActivity : FragmentActivity() {
                     try {
                         BiometricAuthManager.authenticate(
                             activity = this@MainActivity,
-                            title = "Personal Manager",
+                            title = "Unlock to access Personal Manager",
                             subtitle = "Verify Fingerprint or Face",
-                            description = "Confirm your biometric credentials to unlock your private records.",
+                            description = "Confirm your biometric credentials to unlock Personal Manager.",
                             allowDeviceCredential = true,
                             onSuccess = {
                                 isAppUnlocked = true
@@ -200,14 +200,21 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
+                val currentUser by authService.currentUser.collectAsStateWithLifecycle()
                 var currentScreen by remember { mutableStateOf(Screen.Dashboard) }
                 var showQuickActionSheet by remember { mutableStateOf(false) }
-                var showLandingScreen by remember { mutableStateOf(false) }
+                var showLandingScreen by remember { mutableStateOf(currentUser == null) }
+
+                LaunchedEffect(currentUser) {
+                    if (currentUser == null) {
+                        showLandingScreen = true
+                    }
+                }
 
                 if (isAppLocked) {
                     BiometricLockScreen(
-                        title = "Personal Manager Protected",
-                        subtitle = "Biometric authentication is required to access your financial records, balances, tasks, and notes.",
+                        title = "Unlock to access Personal Manager",
+                        subtitle = "Confirm fingerprint, face unlock, or device PIN to access your personal manager.",
                         errorMessage = biometricErrorMessage,
                         onUnlockClick = { triggerBiometricUnlock() }
                     )

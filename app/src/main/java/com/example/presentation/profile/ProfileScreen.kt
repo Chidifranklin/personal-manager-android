@@ -68,7 +68,6 @@ fun ProfileScreen(
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showClearAllDataDialog by remember { mutableStateOf(false) }
-    var showQuickSwitchDialog by remember { mutableStateOf(false) }
     var showExportReportSheet by remember { mutableStateOf(false) }
     val isExporting by viewModel.isExporting.collectAsState()
 
@@ -199,7 +198,11 @@ fun ProfileScreen(
                     currencyCode = currencyCode,
                     onSelectCurrency = { showCurrencyDialog = true },
                     onExportStatements = { showExportReportSheet = true },
-                    onSwitchAccount = { showQuickSwitchDialog = true }
+                    onSwitchAccount = {
+                        viewModel.signOut {
+                            onNavigateToLanding()
+                        }
+                    }
                 )
             }
 
@@ -328,18 +331,6 @@ fun ProfileScreen(
                 TextButton(onClick = { showClearAllDataDialog = false }) {
                     Text("Cancel")
                 }
-            }
-        )
-    }
-
-    // Account Switch Dialog
-    if (showQuickSwitchDialog) {
-        SwitchAccountDialog(
-            currentEmail = currentUser?.email,
-            onDismiss = { showQuickSwitchDialog = false },
-            onSwitch = { email, name ->
-                showQuickSwitchDialog = false
-                viewModel.switchUserQuick(email, name)
             }
         )
     }
@@ -1389,67 +1380,5 @@ private fun BiometricSecuritySection(
             }
         }
     }
-}
-
-@Composable
-private fun SwitchAccountDialog(
-    currentEmail: String?,
-    onDismiss: () -> Unit,
-    onSwitch: (email: String, name: String) -> Unit
-) {
-    var email by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(Icons.Default.SwitchAccount, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        },
-        title = {
-            Text("Switch Account", fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Sign in with a different account. All your records are securely scoped to each account profile.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Account Email") },
-                    placeholder = { Text("user@example.com") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Display Name") },
-                    placeholder = { Text("User Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (email.contains("@")) {
-                        onSwitch(email.trim(), name.trim().ifBlank { email.substringBefore("@") })
-                    }
-                },
-                enabled = email.contains("@")
-            ) {
-                Text("Switch")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 

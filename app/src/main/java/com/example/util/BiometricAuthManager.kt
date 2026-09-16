@@ -65,9 +65,9 @@ object BiometricAuthManager {
      */
     fun authenticate(
         activity: FragmentActivity,
-        title: String = "Personal Manager Security",
-        subtitle: String = "Confirm your identity",
-        description: String = "Unlock to access protected financial data, records, and vault.",
+        title: String = "Unlock to access Personal Manager",
+        subtitle: String = "Verify Fingerprint or Face Unlock",
+        description: String = "Confirm your biometric credentials to access Personal Manager.",
         allowDeviceCredential: Boolean = true,
         negativeButtonText: String = "Cancel",
         onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,

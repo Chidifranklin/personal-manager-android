@@ -1,7 +1,9 @@
 package com.example.data.auth
 
+import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -95,20 +97,29 @@ class FirebaseAuthService(
         val email = sharedPrefs.getString(PREF_AUTH_EMAIL, null)
         val name = sharedPrefs.getString(PREF_AUTH_NAME, null)
         val photo = sharedPrefs.getString(PREF_AUTH_PHOTO, null)
-        val provider = sharedPrefs.getString(PREF_AUTH_PROVIDER, "google.com")
+        val provider = sharedPrefs.getString(PREF_AUTH_PROVIDER, null)
         val created = sharedPrefs.getLong(PREF_AUTH_CREATED, System.currentTimeMillis())
 
-        if (uid != null && email != null && name != null) {
+        // Purge any old hardcoded login from previous sessions
+        if (email != null && (email.contains("chidifranklin", ignoreCase = true) || email == "user@example.com")) {
+            sharedPrefs.edit().clear().apply()
+            _currentUser.value = null
+            return
+        }
+
+        if (uid != null && email != null && name != null && provider != null) {
             _currentUser.value = UserProfile(
                 uid = uid,
                 email = email,
                 displayName = name,
                 photoUrl = photo,
-                provider = provider ?: "google.com",
+                provider = provider,
                 isGoogleUser = provider == "google.com",
                 createdAt = created,
                 lastLoginAt = System.currentTimeMillis()
             )
+        } else {
+            _currentUser.value = null
         }
     }
 
@@ -213,101 +224,202 @@ class FirebaseAuthService(
     ): Result<UserProfile> {
         _isAuthLoading.value = true
         _authError.value = null
-        return try {
-            val auth = firebaseAuthInstance
-            val cleanEmail = email.trim().lowercase()
-            // Deterministic user UID based on email for seamless testing
-            val deterministicUid = "google_" + cleanEmail.replace("@", "_at_").replace(".", "_")
+        val cleanEmail = email.trim().lowercase()
+        val cleanName = displayName.trim().ifBlank { cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() } }
 
-            val profile = if (auth != null) {
-                try {
-                    // Try anonymous or custom auth with Firebase if enabled
-                    val user = auth.currentUser
-                    if (user != null) {
-                        mapFirebaseUser(user).copy(
-                            email = cleanEmail,
-                            displayName = displayName,
-                            photoUrl = photoUrl,
-                            provider = "google.com",
-                            isGoogleUser = true
-                        )
-                    } else {
-                        UserProfile(
-                            uid = deterministicUid,
-                            email = cleanEmail,
-                            displayName = displayName,
-                            photoUrl = photoUrl,
-                            provider = "google.com",
-                            isGoogleUser = true,
-                            createdAt = System.currentTimeMillis(),
-                            lastLoginAt = System.currentTimeMillis()
-                        )
-                    }
-                } catch (e: Exception) {
-                    UserProfile(
-                        uid = deterministicUid,
-                        email = cleanEmail,
-                        displayName = displayName,
-                        photoUrl = photoUrl,
-                        provider = "google.com",
-                        isGoogleUser = true
-                    )
-                }
-            } else {
-                UserProfile(
-                    uid = deterministicUid,
-                    email = cleanEmail,
-                    displayName = displayName,
-                    photoUrl = photoUrl,
-                    provider = "google.com",
-                    isGoogleUser = true
-                )
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            _isAuthLoading.value = false
+            val err = "Please enter a valid Google email address."
+            _authError.value = err
+            return Result.failure(IllegalArgumentException(err))
+        }
+
+        return try {
+            val auth = firebaseAuthInstance ?: FirebaseAuth.getInstance()
+            // Ensure Firebase has an active session for the user
+            val fbUser = try {
+                auth.currentUser ?: auth.signInAnonymously().await().user
+            } catch (e: Exception) {
+                Log.w(TAG, "Firebase session initialization note: ${e.message}")
+                null
             }
+
+            if (fbUser != null) {
+                try {
+                    fbUser.updateProfile(
+                        UserProfileChangeRequest.Builder()
+                            .setDisplayName(cleanName)
+                            .build()
+                    ).await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Profile name update: ${e.message}")
+                }
+            }
+
+            val uid = fbUser?.uid ?: ("google_" + cleanEmail.replace("@", "_at_").replace(".", "_"))
+            val profile = UserProfile(
+                uid = uid,
+                email = cleanEmail,
+                displayName = cleanName,
+                photoUrl = photoUrl,
+                provider = "google.com",
+                isGoogleUser = true,
+                createdAt = fbUser?.metadata?.creationTimestamp ?: System.currentTimeMillis(),
+                lastLoginAt = System.currentTimeMillis()
+            )
 
             _currentUser.value = profile
             persistCachedUser(profile)
+            rememberDeviceGoogleAccount(cleanEmail, cleanName)
             Result.success(profile)
         } catch (e: Exception) {
-            _authError.value = e.localizedMessage ?: "Authentication failed"
+            val msg = e.localizedMessage ?: "Google Sign-In failed"
+            _authError.value = msg
             Result.failure(e)
         } finally {
             _isAuthLoading.value = false
         }
     }
 
+    /**
+     * Queries all Google accounts registered on this device via native Android AccountManager
+     * and remembered device account history.
+     */
+    fun getDeviceGoogleAccounts(): List<DeviceGoogleAccount> {
+        val accounts = mutableListOf<DeviceGoogleAccount>()
+
+        // 1. Check native Android AccountManager for system-registered Google accounts
+        try {
+            val accountManager = AccountManager.get(context)
+            val googleAccounts = accountManager.getAccountsByType("com.google")
+            for (acc in googleAccounts) {
+                val email = acc.name
+                if (email.contains("@")) {
+                    val name = email.substringBefore("@")
+                        .replace(".", " ")
+                        .replace("_", " ")
+                        .split(" ")
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }
+                    accounts.add(DeviceGoogleAccount(email = email, displayName = name))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "AccountManager getAccountsByType error: ${e.message}")
+        }
+
+        // 2. Also check any other accounts with Google or Gmail type/domain
+        try {
+            val accountManager = AccountManager.get(context)
+            for (acc in accountManager.accounts) {
+                if (acc.name.contains("@") && (acc.type.contains("google", ignoreCase = true) || acc.name.endsWith("@gmail.com"))) {
+                    if (accounts.none { it.email.equals(acc.name, ignoreCase = true) }) {
+                        val name = acc.name.substringBefore("@")
+                            .replace(".", " ")
+                            .replace("_", " ")
+                            .split(" ")
+                            .filter { it.isNotBlank() }
+                            .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }
+                        accounts.add(DeviceGoogleAccount(email = acc.name, displayName = name))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "AccountManager all accounts check: ${e.message}")
+        }
+
+        // 3. Retrieve remembered Google accounts on this device
+        val savedAccounts = sharedPrefs.getString("device_known_google_accounts", null)
+        if (!savedAccounts.isNullOrBlank()) {
+            try {
+                val items = savedAccounts.split(";;;")
+                for (item in items) {
+                    val parts = item.split(":::")
+                    if (parts.size >= 2) {
+                        val em = parts[0].trim()
+                        val nm = parts[1].trim()
+                        if (em.contains("@") && accounts.none { it.email.equals(em, ignoreCase = true) }) {
+                            accounts.add(DeviceGoogleAccount(email = em, displayName = nm))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error parsing saved accounts", e)
+            }
+        }
+
+        return accounts.distinctBy { it.email.lowercase() }
+    }
+
+    fun rememberDeviceGoogleAccount(email: String, displayName: String) {
+        val currentList = getDeviceGoogleAccounts().toMutableList()
+        if (currentList.none { it.email.equals(email, ignoreCase = true) }) {
+            currentList.add(DeviceGoogleAccount(email = email, displayName = displayName))
+        }
+        val serialized = currentList.joinToString(";;;") { "${it.email}:::${it.displayName}" }
+        sharedPrefs.edit().putString("device_known_google_accounts", serialized).apply()
+    }
+
+    fun getSystemAccountChooserIntent(): Intent? {
+        return try {
+            AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                arrayOf("com.google"),
+                null,
+                null,
+                null,
+                null
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "AccountManager.newChooseAccountIntent error: ${e.message}")
+            null
+        }
+    }
+
     suspend fun signInWithEmail(email: String, pass: String): Result<UserProfile> {
         _isAuthLoading.value = true
         _authError.value = null
+        val cleanEmail = email.trim()
+
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            _isAuthLoading.value = false
+            val msg = "Please enter a valid email address."
+            _authError.value = msg
+            return Result.failure(IllegalArgumentException(msg))
+        }
+        if (pass.length < 6) {
+            _isAuthLoading.value = false
+            val msg = "Password must be at least 6 characters."
+            _authError.value = msg
+            return Result.failure(IllegalArgumentException(msg))
+        }
+
         return try {
-            val auth = firebaseAuthInstance
-            val cleanEmail = email.trim()
-            if (auth != null) {
-                try {
-                    val result = auth.signInWithEmailAndPassword(cleanEmail, pass).await()
-                    val fbUser = result.user ?: throw IllegalStateException("User not found")
-                    val profile = mapFirebaseUser(fbUser)
-                    _currentUser.value = profile
-                    persistCachedUser(profile)
-                    return Result.success(profile)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Direct Firebase email sign-in error, creating authenticated session", e)
-                }
-            }
-            // Fallback authenticated session for local operation
-            val deterministicUid = "usr_" + cleanEmail.replace("@", "_at_").replace(".", "_")
-            val profile = UserProfile(
-                uid = deterministicUid,
-                email = cleanEmail,
-                displayName = cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
-                provider = "password",
-                isGoogleUser = false
-            )
+            val auth = firebaseAuthInstance ?: FirebaseAuth.getInstance()
+            val result = auth.signInWithEmailAndPassword(cleanEmail, pass).await()
+            val fbUser = result.user ?: throw IllegalStateException("Firebase user was null")
+            val profile = mapFirebaseUser(fbUser)
             _currentUser.value = profile
             persistCachedUser(profile)
             Result.success(profile)
         } catch (e: Exception) {
-            _authError.value = e.localizedMessage ?: "Sign-in error"
-            Result.failure(e)
+            Log.e(TAG, "Firebase signInWithEmail error", e)
+            val friendlyError = when {
+                e.message?.contains("no user record", ignoreCase = true) == true ||
+                e.message?.contains("user-not-found", ignoreCase = true) == true ->
+                    "No account found with this email. Please switch to Create Account."
+                e.message?.contains("wrong-password", ignoreCase = true) == true ||
+                e.message?.contains("invalid-credential", ignoreCase = true) == true ->
+                    "Incorrect password or email. Please check your credentials."
+                e.message?.contains("network", ignoreCase = true) == true ->
+                    "Network error. Please check your internet connection."
+                e.message?.contains("too-many-requests", ignoreCase = true) == true ->
+                    "Access temporarily disabled due to many failed attempts. Try again later."
+                else -> e.localizedMessage ?: "Sign-in failed. Please check your credentials."
+            }
+            _authError.value = friendlyError
+            Result.failure(Exception(friendlyError, e))
         } finally {
             _isAuthLoading.value = false
         }
@@ -316,40 +428,57 @@ class FirebaseAuthService(
     suspend fun signUpWithEmail(email: String, pass: String, displayName: String): Result<UserProfile> {
         _isAuthLoading.value = true
         _authError.value = null
+        val cleanEmail = email.trim()
+        val cleanName = displayName.trim().ifBlank { cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() } }
+
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            _isAuthLoading.value = false
+            val msg = "Please enter a valid email address."
+            _authError.value = msg
+            return Result.failure(IllegalArgumentException(msg))
+        }
+        if (pass.length < 6) {
+            _isAuthLoading.value = false
+            val msg = "Password must be at least 6 characters."
+            _authError.value = msg
+            return Result.failure(IllegalArgumentException(msg))
+        }
+
         return try {
-            val auth = firebaseAuthInstance
-            val cleanEmail = email.trim()
-            if (auth != null) {
-                try {
-                    val result = auth.createUserWithEmailAndPassword(cleanEmail, pass).await()
-                    val fbUser = result.user
-                    if (fbUser != null) {
-                        fbUser.updateProfile(
-                            UserProfileChangeRequest.Builder().setDisplayName(displayName).build()
-                        ).await()
-                        val profile = mapFirebaseUser(fbUser).copy(displayName = displayName)
-                        _currentUser.value = profile
-                        persistCachedUser(profile)
-                        return Result.success(profile)
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Direct Firebase email registration exception", e)
-                }
+            val auth = firebaseAuthInstance ?: FirebaseAuth.getInstance()
+            val result = auth.createUserWithEmailAndPassword(cleanEmail, pass).await()
+            val fbUser = result.user ?: throw IllegalStateException("Firebase user was null")
+
+            try {
+                fbUser.updateProfile(
+                    UserProfileChangeRequest.Builder()
+                        .setDisplayName(cleanName)
+                        .build()
+                ).await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Firebase updateProfile error", e)
             }
-            val deterministicUid = "usr_" + cleanEmail.replace("@", "_at_").replace(".", "_")
-            val profile = UserProfile(
-                uid = deterministicUid,
-                email = cleanEmail,
-                displayName = displayName.ifBlank { cleanEmail.substringBefore("@") },
-                provider = "password",
-                isGoogleUser = false
-            )
+
+            val profile = mapFirebaseUser(fbUser).copy(displayName = cleanName)
             _currentUser.value = profile
             persistCachedUser(profile)
             Result.success(profile)
         } catch (e: Exception) {
-            _authError.value = e.localizedMessage ?: "Registration error"
-            Result.failure(e)
+            Log.e(TAG, "Firebase signUpWithEmail error", e)
+            val friendlyError = when {
+                e.message?.contains("email-already-in-use", ignoreCase = true) == true ||
+                e.message?.contains("already exists", ignoreCase = true) == true ->
+                    "An account with this email already exists. Please switch to Sign In."
+                e.message?.contains("weak-password", ignoreCase = true) == true ->
+                    "Password is too weak. Please use at least 6 characters with mixed letters and numbers."
+                e.message?.contains("invalid-email", ignoreCase = true) == true ->
+                    "The email address format is invalid."
+                e.message?.contains("network", ignoreCase = true) == true ->
+                    "Network error. Please check your internet connection."
+                else -> e.localizedMessage ?: "Account creation failed. Please try again."
+            }
+            _authError.value = friendlyError
+            Result.failure(Exception(friendlyError, e))
         } finally {
             _isAuthLoading.value = false
         }

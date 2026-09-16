@@ -1,8 +1,10 @@
 package com.example.presentation.landing
 
 import android.app.Activity
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.auth.DeviceGoogleAccount
 import com.example.data.auth.FirebaseAuthService
 import com.example.data.auth.UserProfile
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,41 +20,50 @@ class LandingViewModel(
     val isAuthLoading: StateFlow<Boolean> = authService.isAuthLoading
     val authError: StateFlow<String?> = authService.authError
 
-    val defaultSuggestedEmail = "chidifranklin40@gmail.com"
-    val defaultSuggestedName = "Franklin Chidi"
-
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
 
-    fun signInWithGoogle(activity: Activity, onSuccess: () -> Unit) {
+    fun getDeviceGoogleAccounts(): List<DeviceGoogleAccount> {
+        return authService.getDeviceGoogleAccounts()
+    }
+
+    fun getSystemAccountChooserIntent(): Intent? {
+        return authService.getSystemAccountChooserIntent()
+    }
+
+    fun signInWithGoogle(
+        activity: Activity,
+        onRequireManualGoogleAccount: () -> Unit,
+        onSuccess: () -> Unit
+    ) {
         viewModelScope.launch {
             val result = authService.signInWithGoogleCredential(activity)
             result.onSuccess {
-                _userMessage.value = "Successfully signed in with Google"
+                _userMessage.value = "Signed in as ${it.displayName}"
                 onSuccess()
-            }.onFailure {
-                // Seamlessly fall back to standard Google sign-in for device/emulator compatibility
-                signInWithGoogleDirect(
-                    email = defaultSuggestedEmail,
-                    displayName = defaultSuggestedName,
-                    onSuccess = onSuccess
-                )
+            }.onFailure { err ->
+                if (err is androidx.credentials.exceptions.GetCredentialCancellationException) {
+                    _userMessage.value = "Google Sign-In was cancelled."
+                } else {
+                    // Provide fallback for devices/emulators where Google Play Services accounts are not registered
+                    onRequireManualGoogleAccount()
+                }
             }
         }
     }
 
-    fun signInWithGoogleDirect(
-        email: String = defaultSuggestedEmail,
-        displayName: String = defaultSuggestedName,
+    fun signInWithGoogleAccount(
+        email: String,
+        displayName: String,
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
             val result = authService.signInWithGoogleAccount(email, displayName)
             result.onSuccess {
-                _userMessage.value = "Signed in as $displayName ($email)"
+                _userMessage.value = "Signed in as ${it.displayName}"
                 onSuccess()
             }.onFailure { err ->
-                _userMessage.value = "Auth failed: ${err.localizedMessage}"
+                _userMessage.value = err.localizedMessage ?: "Google Sign-In failed"
             }
         }
     }
@@ -79,6 +90,11 @@ class LandingViewModel(
                 _userMessage.value = "Sign-up failed: ${err.localizedMessage}"
             }
         }
+    }
+
+    fun signOut() {
+        authService.signOut()
+        _userMessage.value = "Signed out"
     }
 
     fun clearMessage() {
